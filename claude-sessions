@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+
+usage() {
+  cat >&2 <<'EOF'
+usage: claude-sessions         pick a session with fzf (if installed), else list the last 10
+       claude-sessions -a      list all sessions (--all)
+       claude-sessions <n>     resume session n in its folder
+EOF
+  exit 1
+}
+command -v jq >/dev/null || { echo "claude-sessions: jq is required" >&2; exit 1; }
+
+cd "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
+
+files=(./*/*.jsonl)
+(( ${#files[@]} )) || exit 0
+
+sorted=()
+while read -r f; do sorted+=("$f"); done < <(ls -t "${files[@]}")
+
+row() {
+  local n=$1 f=$2 cwd title
+  IFS=$'\t' read -r cwd title < <(jq -rs '
+    [ (map(.cwd // empty) | first // "?"),
+      ((map(select(.type == "summary" and .summary) | .summary) | first)
+       // (map(select(.type == "user") | .message.content
+              | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
+              | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
+       // "" | gsub("\\s+"; " ") | .[0:70]) ] | @tsv' "$f" 2>/dev/null || echo "?")
+  printf '%3d  %s  %-36s  %s  %s\n' "$n" "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)" "${title:-}"
+}
+
+list() {
+  local n=0 f
+  for f in "${sorted[@]:0:$1}"; do
+    n=$((n + 1))
+    row "$n" "$f"
+  done
+}
+
+resume() {
+  local f=${sorted[$1-1]:-} cwd
+  [[ -n $f ]] || { echo "claude-sessions: no session #$1" >&2; exit 1; }
+  cwd=$(jq -rs 'map(.cwd // empty) | first // empty' "$f")
+  [[ -n $cwd ]] || { echo "claude-sessions: no folder recorded for session #$1" >&2; exit 1; }
+  cd "$cwd"
+  exec claude --resume "$(basename "$f" .jsonl)"
+}
+
+case "${1:-}" in
+  -a|--all) list "${#sorted[@]}" ;;
+  "")
+    if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then
+      pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='resume> ') || exit 0
+      resume "$(awk '{print $1}' <<<"$pick")"
+    else
+      list 10
+    fi
+    ;;
+  *[!0-9]*|0) usage ;;
+  *) resume "$1" ;;
+esac
