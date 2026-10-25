@@ -35,7 +35,7 @@ claude-resume <id>    resume a session in its folder (a unique ID prefix is enou
 claude-resume -h      show help (--help)
 ```
 
-The picker opens when `fzf` is installed and the script runs in a terminal. Type to filter by date, title, folder or ID, and press Enter to resume. Without `fzf`, or when input or output is a pipe or a file, the script prints the last 10 sessions instead; add `-a` for all of them.
+The picker opens when `fzf` is installed and the script runs in a terminal. Type to filter by date, title, folder or ID, and press Enter to resume. The pane below the list shows the highlighted session's last reply and every prompt you sent in it; scroll it with Shift+Up and Shift+Down. Without `fzf`, or when input or output is a pipe or a file, the script prints the last 10 sessions instead; add `-a` for all of them.
 
 Each line shows the last activity, title, working directory and session ID. The title is the name you gave the session with `/rename`, otherwise the title Claude Code generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
 
