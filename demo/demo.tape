@@ -6,38 +6,40 @@ Set Width 1240
 Set Height 590
 Set Padding 24
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 120ms
+Set TypingSpeed 110ms
 
 Hide
-Type "bash demo/sessions.sh /tmp/demo && export HOME=/home/demo CLAUDE_CONFIG_DIR=/tmp/demo PS1='$ ' && alias cr=$PWD/claude-resume && clear"
+Type "bash demo/sessions.sh /tmp/demo && export LANG=C.UTF-8 HOME=/home/demo CLAUDE_CONFIG_DIR=/tmp/demo PATH=$PWD:$PATH PS1='$ ' && clear"
 Enter
 Sleep 1s
 Show
 
 Sleep 500ms
-Type "cr"
+Type "claude-resume"
 Sleep 600ms
 Enter
-Sleep 2s
-Sleep 1500ms
+Sleep 2500ms
 
 Down
-Sleep 1800ms
+Sleep 1600ms
 Down
-Sleep 1800ms
-Down
-Sleep 1800ms
+Sleep 1600ms
 
-Type "blog"
-Sleep 1500ms
-Down
-Sleep 2s
-
-Ctrl+U
-Sleep 600ms
 Type "shop"
 Sleep 1500ms
 Down
 Sleep 1800ms
-Down
+
+Ctrl+U
+Sleep 500ms
+Type "weekly"
+Sleep 1500ms
+Ctrl+D
 Sleep 2500ms
+Right
+Sleep 1200ms
+Enter
+Sleep 2500ms
+
+Ctrl+U
+Sleep 3000ms
