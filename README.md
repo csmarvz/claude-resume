@@ -2,7 +2,7 @@
 
 Lists your Claude Code sessions from every project folder, newest first, and resumes one in the folder it was started in. `claude --resume` only finds a session when you run it from that folder; `claude-resume` changes into it for you.
 
-![claude-resume picker with a preview of the highlighted session](demo/screenshot.png)
+![claude-resume picker: moving through sessions with a preview, then filtering by "blog" and "shop"](demo/demo.gif)
 
 ## Install
 
