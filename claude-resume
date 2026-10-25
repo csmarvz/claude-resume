@@ -15,10 +15,12 @@ die() { echo "claude-resume: $*" >&2; exit 1; }
 case "${1:-}" in
   -h|--help) usage 0 ;;
   ""|-a|--all) ;;
+  --preview) [[ ${2:-} =~ ^[0-9a-f-]+$ ]] || usage ;;
   -*|*[!0-9a-f-]*) usage ;;
 esac
 command -v jq >/dev/null || die "jq is required"
 
+self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/${BASH_SOURCE[0]##*/}"
 projects=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects
 cd "$projects" 2>/dev/null || die "no sessions found in $projects"
 files=(./*/????????-????-????-????-????????????.jsonl)
@@ -29,22 +31,37 @@ while read -r f; do sorted+=("$f"); done < <(ls -t "${files[@]}")
 
 parse() { jq -nRr "[inputs | fromjson? | objects] | $1"; }
 
+info() {
+  { head -n 100 "$1"; grep -E '"type":"(custom|ai)-title"' "$1" || true; } | parse '
+    [ (map(.cwd // empty) | first // "?"),
+      ((map(.customTitle // empty) | last)
+       // (map(.aiTitle // empty) | last)
+       // (map(select(.type == "user") | .message.content
+              | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
+              | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
+       // "" | gsub("\\s+"; " ")) ] | join("\t")'
+}
+
+session() {
+  local f matches=()
+  for f in "${sorted[@]}"; do
+    if [[ ${f##*/} == "$1"* ]]; then matches+=("$f"); fi
+  done
+  (( ${#matches[@]} )) || die "no session $1"
+  (( ${#matches[@]} == 1 )) || die "$1 matches ${#matches[@]} sessions, use more of the ID"
+  echo "${matches[0]}"
+}
+
 list() {
   local f id cwd title i tw=0 cw=0
   local dates=() titles=() cwds=() ids=()
   for f in "${sorted[@]:0:$1}"; do
-    IFS=$'\t' read -r cwd title < <({ head -n 100 "$f"; grep -E '"type":"(custom|ai)-title"' "$f" || true; } | parse '
-      [ (map(.cwd // empty) | first // "?"),
-        ((map(.customTitle // empty) | last)
-         // (map(.aiTitle // empty) | last)
-         // (map(select(.type == "user") | .message.content
-                | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
-                | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
-         // "" | gsub("\\s+"; " ") | .[0:50]) ] | join("\t")')
+    IFS=$'\t' read -r cwd title < <(info "$f")
+    title=${title:0:50}
     if [[ $cwd == "$HOME" || $cwd == "$HOME"/* ]]; then cwd="~${cwd#"$HOME"}"; fi
     id=${f##*/}
     dates+=("$(date -r "$f" '+%Y-%m-%d %H:%M')")
-    titles+=("${title:-}")
+    titles+=("$title")
     cwds+=("$cwd")
     ids+=("${id%.jsonl}")
     tw=$(( ${#title} > tw ? ${#title} : tw ))
@@ -58,14 +75,33 @@ list() {
   done
 }
 
+preview() {
+  local f cwd title id
+  f=$(session "$1")
+  IFS=$'\t' read -r cwd title < <(info "$f")
+  if [[ $cwd == "$HOME" || $cwd == "$HOME"/* ]]; then cwd="~${cwd#"$HOME"}"; fi
+  id=${f##*/}
+  printf '\033[1m%s\033[0m\n\033[2m%s  ·  %s  ·  %s\033[0m\n\n' \
+    "${title:-(untitled)}" "$cwd" "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${id%.jsonl}"
+
+  printf '\033[1mLast reply\033[0m\n'
+  { grep '"type":"assistant"' "$f" || true; } | tail -n 50 | parse '
+    map(.message.content | arrays | map(select(.type == "text") | .text) | join("\n") | select(length > 0))
+    | last // "(none)" | .[0:1500]'
+
+  printf '\n\033[1mPrompts\033[0m\n'
+  { grep '"type":"user"' "$f" | grep -v '"type":"tool_result"' || true; } | parse '
+    map(select(.isMeta != true and .isCompactSummary != true) | .message.content
+        | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
+        | select(type == "string" and length > 0 and (startswith("<") | not))
+        | gsub("\\s+"; " ") | .[0:300])
+    | reduce .[] as $p ([]; if index([$p]) then . else . + [$p] end)
+    | if length == 0 then "(none)" else map("› " + .) | join("\n") end'
+}
+
 resume() {
-  local f matches=() cwd
-  for f in "${sorted[@]}"; do
-    if [[ ${f##*/} == "$1"* ]]; then matches+=("$f"); fi
-  done
-  (( ${#matches[@]} )) || die "no session $1"
-  (( ${#matches[@]} == 1 )) || die "$1 matches ${#matches[@]} sessions, use more of the ID"
-  f=${matches[0]}
+  local f cwd
+  f=$(session "$1")
   cwd=$(head -n 100 "$f" | parse 'map(.cwd // empty) | first // empty')
   [[ -n $cwd ]] || die "no folder recorded for session $1"
   cd "$cwd" 2>/dev/null || die "folder $cwd no longer exists"
@@ -75,9 +111,11 @@ resume() {
 
 case "${1:-}" in
   -a|--all) list "${#sorted[@]}" ;;
+  --preview) preview "$2" ;;
   "")
     if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then
-      pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='search> ') || exit 0
+      pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='search> ' \
+        --preview "$(printf '%q' "$self") --preview {-1}" --preview-window 'down,60%,wrap') || exit 0
       resume "${pick##* }"
     else
       list 10
