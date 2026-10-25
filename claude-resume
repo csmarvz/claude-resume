@@ -115,6 +115,7 @@ case "${1:-}" in
   "")
     if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then
       pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='search> ' \
+        --header '↑↓ select · Enter resume session · type to search · Esc quit' \
         --preview "$(printf '%q' "$self") --preview {-1}" --preview-window 'down,60%,wrap') || exit 0
       resume "${pick##* }"
     else
