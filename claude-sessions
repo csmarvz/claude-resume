@@ -8,7 +8,7 @@ usage: claude-sessions         pick a session with fzf (if installed), else list
        claude-sessions -a      list all sessions (--all)
        claude-sessions <n>     resume session n in its folder
 EOF
-  exit 1
+  exit "${1:-1}"
 }
 command -v jq >/dev/null || { echo "claude-sessions: jq is required" >&2; exit 1; }
 
@@ -50,6 +50,7 @@ resume() {
 }
 
 case "${1:-}" in
+  -h|--help) usage 0 ;;
   -a|--all) list "${#sorted[@]}" ;;
   "")
     if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then

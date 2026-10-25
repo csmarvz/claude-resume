@@ -3,20 +3,54 @@
 Lists your Claude Code sessions from every project folder, newest first, and resumes one in the folder it was started in.
 
 ```
-claude-sessions         pick a session with fzf (if installed), else list the last 10
-claude-sessions -a      list all sessions (--all)
-claude-sessions <n>     resume session n in its folder
+  1  2026-10-25 17:35  ~/dev/shop                  3112af4c-…  fix the checkout total rounding
+  2  2026-10-24 00:25  ~/dev/shop/backend          cfba6d38-…  how does the order export work?
+  3  2026-10-22 13:57  ~/dev/blog                  31cbcd4d-…  add an RSS feed
 ```
-
-Each line shows the number, last activity, working directory, session ID and the first prompt (or the session summary, when there is one).
 
 ## Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-sessions/main/claude-sessions -o ~/.local/bin/claude-sessions
-chmod +x ~/.local/bin/claude-sessions
+curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-sessions/main/install.sh | bash
 ```
 
-Needs `jq` and bash. `fzf` is optional; without it you get the numbered list. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
+The installer puts `claude-sessions` in `~/.local/bin` and installs `jq` and `fzf` if they are missing. It finds the package manager on its own (apt, dnf, pacman, zypper, apk or Homebrew) and uses `sudo` for everything except Homebrew. To install somewhere else, set `PREFIX` to a folder you can write to; the script goes in `$PREFIX/bin`.
+
+To install from a clone instead:
+
+```
+git clone https://github.com/csmarvz/claude-sessions.git
+cd claude-sessions
+./install.sh
+```
+
+You also need the `claude` CLI to resume sessions.
+
+## Usage
+
+```
+claude-sessions         pick a session with fzf, or list the last 10 without it
+claude-sessions -a      list all sessions (--all)
+claude-sessions <n>     resume session n in its folder
+claude-sessions -h      show help (--help)
+```
+
+In the picker, type to filter by folder, date or prompt, and press Enter to resume. When the output goes to a pipe or a file, the script prints the list instead of opening the picker.
+
+Each line shows the number, last activity, working directory, session ID, and the session summary or first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
+
+## Uninstall
+
+```
+rm ~/.local/bin/claude-sessions
+```
+
+`jq` and `fzf` stay installed.
+
+## Caveat
 
 The script reads Claude Code's session files directly. Their format is not a public API, so a Claude Code update can break it.
+
+## License
+
+MIT
