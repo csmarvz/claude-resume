@@ -30,8 +30,8 @@ row() {
        // (map(select(.type == "user") | .message.content
               | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
               | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
-       // "" | gsub("\\s+"; " ") | .[0:70]) ] | @tsv' 2>/dev/null || echo "?")
-  printf '%s  %-36s  %s  %s\n' "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)" "${title:-}"
+       // "" | gsub("\\s+"; " ") | .[0:50]) ] | @tsv' 2>/dev/null || echo "?")
+  printf '%s  %-50s  %-32s  %s\n' "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${title:-}" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)"
 }
 
 list() {
@@ -57,7 +57,7 @@ case "${1:-}" in
   "")
     if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then
       pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='resume> ') || exit 0
-      resume "$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' <<<"$pick" | head -n 1)"
+      resume "$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' <<<"$pick" | tail -n 1)"
     else
       list 10
     fi

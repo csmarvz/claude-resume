@@ -3,9 +3,9 @@
 Lists your Claude Code sessions from every project folder, newest first, and resumes one in the folder it was started in.
 
 ```
-2026-10-25 17:35  ~/dev/shop                  3112af4c-2168-4178-b106-863032d0fe40  Checkout total rounding fix
-2026-10-24 00:25  ~/dev/shop/backend          cfba6d38-db92-4f58-bb85-77d44402490a  Order export walkthrough
-2026-10-22 13:57  ~/dev/blog                  31cbcd4d-dcd3-4e3d-9268-1f4b756a0cbf  RSS feed
+2026-10-25 17:35  Checkout total rounding fix    ~/dev/shop          3112af4c-2168-4178-b106-863032d0fe40
+2026-10-24 00:25  Order export walkthrough       ~/dev/shop/backend  cfba6d38-db92-4f58-bb85-77d44402490a
+2026-10-22 13:57  RSS feed                       ~/dev/blog          31cbcd4d-dcd3-4e3d-9268-1f4b756a0cbf
 ```
 
 ## Install
@@ -37,7 +37,7 @@ claude-sessions -h      show help (--help)
 
 In the picker, type to filter by folder, date or prompt, and press Enter to resume. When the output goes to a pipe or a file, the script prints the list instead of opening the picker.
 
-Each line shows the last activity, working directory, session ID and title. The title is the name you gave the session with `/rename`, otherwise the title Claude Code generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
+Each line shows the last activity, title, working directory and session ID. The title is the name you gave the session with `/rename`, otherwise the title Claude Code generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
 
 ## Uninstall
 
