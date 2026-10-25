@@ -10,58 +10,78 @@ usage: claude-resume         pick a session with fzf (if installed), else list t
 EOF
   exit "${1:-1}"
 }
-[[ ${1:-} == -h || ${1:-} == --help ]] && usage 0
-command -v jq >/dev/null || { echo "claude-resume: jq is required" >&2; exit 1; }
+die() { echo "claude-resume: $*" >&2; exit 1; }
 
-cd "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" 2>/dev/null || exit 0
+case "${1:-}" in
+  -h|--help) usage 0 ;;
+  ""|-a|--all) ;;
+  -*|*[!0-9a-f-]*) usage ;;
+esac
+command -v jq >/dev/null || die "jq is required"
 
-files=(./*/*.jsonl)
-(( ${#files[@]} )) || exit 0
+projects=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects
+cd "$projects" 2>/dev/null || die "no sessions found in $projects"
+files=(./*/????????-????-????-????-????????????.jsonl)
+(( ${#files[@]} )) || die "no sessions found in $projects"
 
 sorted=()
 while read -r f; do sorted+=("$f"); done < <(ls -t "${files[@]}")
 
-row() {
-  local f=$1 cwd title
-  IFS=$'\t' read -r cwd title < <({ head -n 100 "$f"; grep -E '"type":"(custom|ai)-title"' "$f"; } | jq -rs '
-    [ (map(.cwd // empty) | first // "?"),
-      ((map(.customTitle // empty) | last)
-       // (map(.aiTitle // empty) | last)
-       // (map(select(.type == "user") | .message.content
-              | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
-              | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
-       // "" | gsub("\\s+"; " ") | .[0:50] | . + ("                                                  "[0:50 - length])) ] | @tsv' 2>/dev/null || echo "?")
-  printf '%s  %s  %-32s  %s\n' "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${title:-}" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)"
-}
+parse() { jq -nRr "[inputs | fromjson? | objects] | $1"; }
 
 list() {
-  local f
+  local f id cwd title i tw=0 cw=0
+  local dates=() titles=() cwds=() ids=()
   for f in "${sorted[@]:0:$1}"; do
-    row "$f"
+    IFS=$'\t' read -r cwd title < <({ head -n 100 "$f"; grep -E '"type":"(custom|ai)-title"' "$f" || true; } | parse '
+      [ (map(.cwd // empty) | first // "?"),
+        ((map(.customTitle // empty) | last)
+         // (map(.aiTitle // empty) | last)
+         // (map(select(.type == "user") | .message.content
+                | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
+                | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
+         // "" | gsub("\\s+"; " ") | .[0:50]) ] | join("\t")')
+    if [[ $cwd == "$HOME" || $cwd == "$HOME"/* ]]; then cwd="~${cwd#"$HOME"}"; fi
+    id=${f##*/}
+    dates+=("$(date -r "$f" '+%Y-%m-%d %H:%M')")
+    titles+=("${title:-}")
+    cwds+=("$cwd")
+    ids+=("${id%.jsonl}")
+    tw=$(( ${#title} > tw ? ${#title} : tw ))
+    cw=$(( ${#cwd} > cw ? ${#cwd} : cw ))
+  done
+  for i in "${!ids[@]}"; do
+    printf '%s  %s%*s  %s%*s  %s\n' "${dates[i]}" \
+      "${titles[i]}" $((tw - ${#titles[i]})) '' \
+      "${cwds[i]}" $((cw - ${#cwds[i]})) '' \
+      "${ids[i]}"
   done
 }
 
 resume() {
-  local matches=(./*/"$1"*.jsonl) f cwd
-  (( ${#matches[@]} )) || { echo "claude-resume: no session $1" >&2; exit 1; }
-  (( ${#matches[@]} == 1 )) || { echo "claude-resume: $1 matches ${#matches[@]} sessions, use more of the ID" >&2; exit 1; }
+  local f matches=() cwd
+  for f in "${sorted[@]}"; do
+    if [[ ${f##*/} == "$1"* ]]; then matches+=("$f"); fi
+  done
+  (( ${#matches[@]} )) || die "no session $1"
+  (( ${#matches[@]} == 1 )) || die "$1 matches ${#matches[@]} sessions, use more of the ID"
   f=${matches[0]}
-  cwd=$(head -n 100 "$f" | jq -rs 'map(.cwd // empty) | first // empty')
-  [[ -n $cwd ]] || { echo "claude-resume: no folder recorded for session $1" >&2; exit 1; }
-  cd "$cwd"
-  exec claude --resume "$(basename "$f" .jsonl)"
+  cwd=$(head -n 100 "$f" | parse 'map(.cwd // empty) | first // empty')
+  [[ -n $cwd ]] || die "no folder recorded for session $1"
+  cd "$cwd" 2>/dev/null || die "folder $cwd no longer exists"
+  f=${f##*/}
+  exec claude --resume "${f%.jsonl}"
 }
 
 case "${1:-}" in
   -a|--all) list "${#sorted[@]}" ;;
   "")
     if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then
-      pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='resume> ') || exit 0
-      resume "$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' <<<"$pick" | tail -n 1)"
+      pick=$(list "${#sorted[@]}" | fzf --no-sort --layout=reverse --prompt='search> ') || exit 0
+      resume "${pick##* }"
     else
       list 10
     fi
     ;;
-  -*|*[!0-9a-f-]*) usage ;;
   *) resume "$1" ;;
 esac
