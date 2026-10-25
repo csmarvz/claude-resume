@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_raw=https://raw.githubusercontent.com/csmarvz/claude-sessions/main
+repo_raw=https://raw.githubusercontent.com/csmarvz/claude-resume/main
 bin_dir=${PREFIX:-$HOME/.local}/bin
 
 say() { printf '==> %s\n' "$*"; }
@@ -35,14 +35,14 @@ if (( ${#missing[@]} )); then
 fi
 
 mkdir -p "$bin_dir"
-src="$(dirname "${BASH_SOURCE[0]:-}")/claude-sessions"
+src="$(dirname "${BASH_SOURCE[0]:-}")/claude-resume"
 if [[ -n ${BASH_SOURCE[0]:-} && -f $src ]]; then
-  install -m 755 "$src" "$bin_dir/claude-sessions"
+  install -m 755 "$src" "$bin_dir/claude-resume"
 else
-  curl -fsSL "$repo_raw/claude-sessions" -o "$bin_dir/claude-sessions"
-  chmod 755 "$bin_dir/claude-sessions"
+  curl -fsSL "$repo_raw/claude-resume" -o "$bin_dir/claude-resume"
+  chmod 755 "$bin_dir/claude-resume"
 fi
-say "installed $bin_dir/claude-sessions"
+say "installed $bin_dir/claude-resume"
 
 case ":$PATH:" in
   *":$bin_dir:"*) ;;

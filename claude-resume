@@ -4,14 +4,14 @@ shopt -s nullglob
 
 usage() {
   cat >&2 <<'EOF'
-usage: claude-sessions         pick a session with fzf (if installed), else list the last 10
-       claude-sessions -a      list all sessions (--all)
-       claude-sessions <id>    resume a session in its folder (a unique ID prefix is enough)
+usage: claude-resume         pick a session with fzf (if installed), else list the last 10
+       claude-resume -a      list all sessions (--all)
+       claude-resume <id>    resume a session in its folder (a unique ID prefix is enough)
 EOF
   exit "${1:-1}"
 }
 [[ ${1:-} == -h || ${1:-} == --help ]] && usage 0
-command -v jq >/dev/null || { echo "claude-sessions: jq is required" >&2; exit 1; }
+command -v jq >/dev/null || { echo "claude-resume: jq is required" >&2; exit 1; }
 
 cd "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" 2>/dev/null || exit 0
 
@@ -43,11 +43,11 @@ list() {
 
 resume() {
   local matches=(./*/"$1"*.jsonl) f cwd
-  (( ${#matches[@]} )) || { echo "claude-sessions: no session $1" >&2; exit 1; }
-  (( ${#matches[@]} == 1 )) || { echo "claude-sessions: $1 matches ${#matches[@]} sessions, use more of the ID" >&2; exit 1; }
+  (( ${#matches[@]} )) || { echo "claude-resume: no session $1" >&2; exit 1; }
+  (( ${#matches[@]} == 1 )) || { echo "claude-resume: $1 matches ${#matches[@]} sessions, use more of the ID" >&2; exit 1; }
   f=${matches[0]}
   cwd=$(head -n 100 "$f" | jq -rs 'map(.cwd // empty) | first // empty')
-  [[ -n $cwd ]] || { echo "claude-sessions: no folder recorded for session $1" >&2; exit 1; }
+  [[ -n $cwd ]] || { echo "claude-resume: no folder recorded for session $1" >&2; exit 1; }
   cd "$cwd"
   exec claude --resume "$(basename "$f" .jsonl)"
 }

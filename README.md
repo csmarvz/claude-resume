@@ -1,4 +1,4 @@
-# claude-sessions
+# claude-resume
 
 Lists your Claude Code sessions from every project folder, newest first, and resumes one in the folder it was started in.
 
@@ -11,16 +11,16 @@ Lists your Claude Code sessions from every project folder, newest first, and res
 ## Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-sessions/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.sh | bash
 ```
 
-The installer puts `claude-sessions` in `~/.local/bin` and installs `jq` and `fzf` if they are missing. It finds the package manager on its own (apt, dnf, pacman, zypper, apk or Homebrew) and uses `sudo` for everything except Homebrew. To install somewhere else, set `PREFIX` to a folder you can write to; the script goes in `$PREFIX/bin`.
+The installer puts `claude-resume` in `~/.local/bin` and installs `jq` and `fzf` if they are missing. It finds the package manager on its own (apt, dnf, pacman, zypper, apk or Homebrew) and uses `sudo` for everything except Homebrew. To install somewhere else, set `PREFIX` to a folder you can write to; the script goes in `$PREFIX/bin`.
 
 To install from a clone instead:
 
 ```
-git clone https://github.com/csmarvz/claude-sessions.git
-cd claude-sessions
+git clone https://github.com/csmarvz/claude-resume.git
+cd claude-resume
 ./install.sh
 ```
 
@@ -29,10 +29,10 @@ You also need the `claude` CLI to resume sessions.
 ## Usage
 
 ```
-claude-sessions         pick a session with fzf, or list the last 10 without it
-claude-sessions -a      list all sessions (--all)
-claude-sessions <id>    resume a session in its folder (a unique ID prefix is enough)
-claude-sessions -h      show help (--help)
+claude-resume         pick a session with fzf, or list the last 10 without it
+claude-resume -a      list all sessions (--all)
+claude-resume <id>    resume a session in its folder (a unique ID prefix is enough)
+claude-resume -h      show help (--help)
 ```
 
 In the picker, type to filter by folder, date or prompt, and press Enter to resume. When the output goes to a pipe or a file, the script prints the list instead of opening the picker.
@@ -42,7 +42,7 @@ Each line shows the last activity, title, working directory and session ID. The 
 ## Uninstall
 
 ```
-rm ~/.local/bin/claude-sessions
+rm ~/.local/bin/claude-resume
 ```
 
 `jq` and `fzf` stay installed.
