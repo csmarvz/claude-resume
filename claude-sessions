@@ -10,9 +10,10 @@ usage: claude-sessions         pick a session with fzf (if installed), else list
 EOF
   exit "${1:-1}"
 }
+[[ ${1:-} == -h || ${1:-} == --help ]] && usage 0
 command -v jq >/dev/null || { echo "claude-sessions: jq is required" >&2; exit 1; }
 
-cd "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
+cd "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" 2>/dev/null || exit 0
 
 files=(./*/*.jsonl)
 (( ${#files[@]} )) || exit 0
@@ -50,7 +51,6 @@ resume() {
 }
 
 case "${1:-}" in
-  -h|--help) usage 0 ;;
   -a|--all) list "${#sorted[@]}" ;;
   "")
     if command -v fzf >/dev/null && [[ -t 0 && -t 1 ]]; then
