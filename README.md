@@ -37,7 +37,7 @@ claude-sessions -h      show help (--help)
 
 In the picker, type to filter by folder, date or prompt, and press Enter to resume. When the output goes to a pipe or a file, the script prints the list instead of opening the picker.
 
-Each line shows the number, last activity, working directory, session ID, and the session summary or first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
+Each line shows the number, last activity, working directory, session ID and title. The title is the name you gave the session with `/rename`, otherwise the title Claude Code generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
 
 ## Uninstall
 

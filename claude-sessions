@@ -23,13 +23,14 @@ while read -r f; do sorted+=("$f"); done < <(ls -t "${files[@]}")
 
 row() {
   local n=$1 f=$2 cwd title
-  IFS=$'\t' read -r cwd title < <(jq -rs '
+  IFS=$'\t' read -r cwd title < <({ head -n 100 "$f"; grep -E '"type":"(custom|ai)-title"' "$f"; } | jq -rs '
     [ (map(.cwd // empty) | first // "?"),
-      ((map(select(.type == "summary" and .summary) | .summary) | first)
+      ((map(.customTitle // empty) | last)
+       // (map(.aiTitle // empty) | last)
        // (map(select(.type == "user") | .message.content
               | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
               | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
-       // "" | gsub("\\s+"; " ") | .[0:70]) ] | @tsv' "$f" 2>/dev/null || echo "?")
+       // "" | gsub("\\s+"; " ") | .[0:70]) ] | @tsv' 2>/dev/null || echo "?")
   printf '%3d  %s  %-36s  %s  %s\n' "$n" "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)" "${title:-}"
 }
 
@@ -44,7 +45,7 @@ list() {
 resume() {
   local f=${sorted[$1-1]:-} cwd
   [[ -n $f ]] || { echo "claude-sessions: no session #$1" >&2; exit 1; }
-  cwd=$(jq -rs 'map(.cwd // empty) | first // empty' "$f")
+  cwd=$(head -n 100 "$f" | jq -rs 'map(.cwd // empty) | first // empty')
   [[ -n $cwd ]] || { echo "claude-sessions: no folder recorded for session #$1" >&2; exit 1; }
   cd "$cwd"
   exec claude --resume "$(basename "$f" .jsonl)"
