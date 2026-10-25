@@ -30,8 +30,8 @@ row() {
        // (map(select(.type == "user") | .message.content
               | if type == "array" then map(select(.type == "text") | .text) | join(" ") else . end
               | select(type == "string" and length > 0 and (startswith("<") | not))) | first)
-       // "" | gsub("\\s+"; " ") | .[0:50]) ] | @tsv' 2>/dev/null || echo "?")
-  printf '%s  %-50s  %-32s  %s\n' "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${title:-}" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)"
+       // "" | gsub("\\s+"; " ") | .[0:50] | . + ("                                                  "[0:50 - length])) ] | @tsv' 2>/dev/null || echo "?")
+  printf '%s  %s  %-32s  %s\n' "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${title:-}" "${cwd/#$HOME/\~}" "$(basename "$f" .jsonl)"
 }
 
 list() {
