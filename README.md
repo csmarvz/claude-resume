@@ -1,10 +1,8 @@
-# claude-resume
-
-Lists your Claude Code sessions from every project folder, newest first, and resumes one in the folder it was started in. `claude --resume` only finds a session when you run it from that folder; `claude-resume` changes into it for you.
-
 > [!WARNING]
 > This is alpha software. It reads Claude Code's internal session files, whose format can change with any Claude Code update, and its delete feature removes files for good. It may break, show wrong data or delete more than you expect. Back up `~/.claude` before deleting sessions you care about.
 
+# claude-resume
+List all your Claude Code sessions and resume them in the folder they were started in.
 ![claude-resume picker: moving through sessions with a preview, filtering, and deleting a session](demo/demo.gif)
 
 ## Install
