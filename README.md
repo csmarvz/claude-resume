@@ -58,7 +58,7 @@ Run the install command again; it replaces the installed program with the latest
 
 ### Upgrading from the bash version
 
-Versions before 2.0 were a bash script that needed `jq` and `fzf`. To switch to the new program:
+The first versions were a bash script that needed `jq` and `fzf`. To switch to the new program:
 
 1. Run the install command above again. If you installed with a custom `PREFIX`, set the same one. The new program replaces the script at the same path, even when that path is a symlink into a clone of this repository, so aliases such as `cr` keep working.
 2. Check that it worked: `claude-resume -h` should no longer mention fzf.
