@@ -20,6 +20,7 @@ type tty struct {
 	keys chan []byte
 	wake chan struct{}
 	pend []byte
+	w, h int
 }
 
 func openTTY() *tty {
@@ -67,6 +68,11 @@ func (t *tty) size() (int, int) {
 	return w, h
 }
 
+func (t *tty) resized() bool {
+	w, h := t.size()
+	return w != t.w || h != t.h
+}
+
 func (t *tty) drain() {
 	t.pend = nil
 	for {
@@ -97,7 +103,7 @@ var ctrl = map[byte]string{
 	0x15: "ctrl-u", 0x17: "ctrl-w",
 }
 
-// read returns the next key, or "" after a quiet interval or a wake-up so the caller can redraw.
+// read returns the next key, "wake" when a preview has loaded, or "" after a quiet interval.
 func (t *tty) read() string {
 	for len(t.pend) == 0 {
 		select {
@@ -107,7 +113,7 @@ func (t *tty) read() string {
 			}
 			t.pend = append(t.pend, b...)
 		case <-t.wake:
-			return ""
+			return "wake"
 		case <-time.After(250 * time.Millisecond):
 			return ""
 		}
@@ -183,13 +189,17 @@ func (v *view) filter() {
 
 func (t *tty) run(v *view) (string, int) {
 	v.filter()
+	redraw := true
 	for {
-		t.draw(v)
+		if redraw || t.resized() {
+			t.draw(v)
+		}
 		k := t.read()
+		redraw = k != ""
 		n := len(v.shown)
 		edited := false
 		switch k {
-		case "":
+		case "", "wake":
 			continue
 		case "esc":
 			return k, -1
@@ -308,6 +318,7 @@ func wrap(lines []line, w int) []line {
 
 func (t *tty) draw(v *view) {
 	w, h := t.size()
+	t.w, t.h = w, h
 	var rows []string
 	p := "\x1b[1;38;5;110m" + v.prompt
 	if v.dim {
@@ -509,11 +520,15 @@ func pick(all []*session) {
 
 func (t *tty) confirm(lines []line) bool {
 	t.drain()
-	sel, last := 0, time.Now()
+	sel, last, redraw := 0, time.Now(), true
 	for {
-		t.dialog(lines, sel)
-		switch t.read() {
-		case "":
+		if redraw || t.resized() {
+			t.dialog(lines, sel)
+		}
+		k := t.read()
+		redraw = k != ""
+		switch k {
+		case "", "wake":
 			if time.Since(last) > 10*time.Minute {
 				return false
 			}
@@ -533,6 +548,7 @@ func (t *tty) confirm(lines []line) bool {
 
 func (t *tty) dialog(lines []line, sel int) {
 	cols, rows := t.size()
+	t.w, t.h = cols, rows
 	w := min(cols-4, 96)
 	if w < 30 {
 		w = min(cols, 30)
