@@ -35,3 +35,23 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestNewer(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"0.0.5-alpha", "0.0.4-alpha", true},
+		{"0.0.4-alpha", "0.0.5-alpha", false},
+		{"0.0.4-alpha", "0.0.4-alpha", false},
+		{"0.0.10-alpha", "0.0.9-alpha", true},
+		{"0.1.0", "0.1.0-alpha", true},
+		{"0.1.0-alpha", "0.1.0", false},
+		{"0.0.4-alpha", "0.0.4-alpha.0.20261028142944-0be9857629ba", false},
+		{"1.0.0", "0.9.9", true},
+	} {
+		if got := newer(c.a, c.b); got != c.want {
+			t.Errorf("newer(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

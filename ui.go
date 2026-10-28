@@ -452,15 +452,15 @@ func pick(all []*session) {
 		s := shown[i]
 		mu.Lock()
 		defer mu.Unlock()
-		if l, ok := cache[s.id]; ok {
+		if l, ok := cache[s.path]; ok {
 			return l
 		}
-		if !loading[s.id] {
-			loading[s.id] = true
+		if !loading[s.path] {
+			loading[s.path] = true
 			go func() {
 				l := preview(s)
 				mu.Lock()
-				cache[s.id] = l
+				cache[s.path] = l
 				mu.Unlock()
 				t.poke()
 			}()
@@ -515,7 +515,7 @@ func pick(all []*session) {
 			choose = true
 		case "enter":
 			t.close()
-			resume(all, shown[i].id)
+			resume(shown[i])
 		case "ctrl-r":
 			s := shown[i]
 			e := &view{prompt: "rename> ", items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(s.title),
@@ -523,17 +523,17 @@ func pick(all []*session) {
 			e.cur = len(e.query)
 			msg = ""
 			if k, _ := t.run(e); k == "enter" {
-				msg, _ = rename(all, s.id, string(e.query))
+				msg, _ = rename(s, string(e.query))
 				mu.Lock()
-				delete(cache, s.id)
-				delete(loading, s.id)
+				delete(cache, s.path)
+				delete(loading, s.path)
 				mu.Unlock()
 			}
 			v.hide = e.hide
 		case "ctrl-d":
 			t.drain()
 			var ok bool
-			msg, ok = remove(all, shown[i].id, false, func(q string, lines []line) bool {
+			msg, ok = remove(all, shown[i], false, func(q string, lines []line) bool {
 				saved := *v
 				defer func() { *v = saved }()
 				v.preview, v.foot, v.warn, v.dim, v.hide, v.pscroll = func(int) []line { return lines }, q, true, true, false, 0
@@ -551,7 +551,7 @@ func pick(all []*session) {
 			})
 			if ok {
 				for j, s := range all {
-					if s.id == shown[i].id {
+					if s == shown[i] {
 						all = append(all[:j], all[j+1:]...)
 						break
 					}

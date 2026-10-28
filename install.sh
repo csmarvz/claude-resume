@@ -7,7 +7,8 @@ say() { printf '==> %s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
 main() {
-  local os arch tmp
+  local os arch tmp name want got
+  local base=https://github.com/csmarvz/claude-resume/releases/latest/download
   case $(uname -s) in
     Linux) os=linux ;;
     Darwin) os=darwin ;;
@@ -21,8 +22,11 @@ main() {
 
   mkdir -p "$bin_dir"
   tmp="$bin_dir/.claude-resume.tmp"
-  curl -fsSL "https://github.com/csmarvz/claude-resume/releases/latest/download/claude-resume-$os-$arch" -o "$tmp" ||
-    { rm -f "$tmp"; die "download failed"; }
+  name=claude-resume-$os-$arch
+  curl -fsSL "$base/$name" -o "$tmp" || { rm -f "$tmp"; die "download failed"; }
+  want=$(curl -fsSL "$base/checksums.txt" | awk -v n="$name" '$2 == n { print $1 }') || true
+  got=$({ sha256sum "$tmp" 2>/dev/null || shasum -a 256 "$tmp"; } | cut -d ' ' -f 1)
+  [ -n "$want" ] && [ "$got" = "$want" ] || { rm -f "$tmp"; die "the download does not match its checksum; nothing was installed"; }
   chmod 755 "$tmp"
   mv "$tmp" "$bin_dir/claude-resume"
   say "installed $bin_dir/claude-resume"

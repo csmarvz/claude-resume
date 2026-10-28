@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -86,7 +87,7 @@ func notice() string {
 	}
 	b, _ := os.ReadFile(f)
 	v := strings.TrimPrefix(strings.TrimSpace(string(b)), "v")
-	if v == "" || v == currentVersion() {
+	if v == "" || !newer(v, currentVersion()) {
 		return ""
 	}
 	return label() + " → v" + v + ": run claude-resume update"
@@ -99,8 +100,8 @@ func update() {
 	}
 	remember(tag)
 	v := strings.TrimPrefix(tag, "v")
-	if v == currentVersion() {
-		fmt.Printf("claude-resume %s is up to date\n", v)
+	if !newer(v, currentVersion()) {
+		fmt.Printf("claude-resume %s is up to date\n", currentVersion())
 		return
 	}
 	name := "claude-resume-" + runtime.GOOS + "-" + runtime.GOARCH
@@ -144,4 +145,28 @@ func update() {
 		die("cannot replace %s: %v", exe, err)
 	}
 	fmt.Printf("updated claude-resume %s to %s\n", currentVersion(), v)
+}
+
+// newer reports whether version a is later than b, comparing major.minor.patch
+// numerically and treating a release as later than its pre-releases.
+func newer(a, b string) bool {
+	an, ap, _ := strings.Cut(a, "-")
+	bn, bp, _ := strings.Cut(b, "-")
+	as, bs := strings.Split(an, "."), strings.Split(bn, ".")
+	for i := range max(len(as), len(bs)) {
+		var x, y int
+		if i < len(as) {
+			x, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			y, _ = strconv.Atoi(bs[i])
+		}
+		if x != y {
+			return x > y
+		}
+	}
+	if ap == "" || bp == "" {
+		return ap == "" && bp != ""
+	}
+	return ap > bp
 }

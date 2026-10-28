@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -183,11 +184,12 @@ func main() {
 		if !yes && !stdin {
 			die("deleting needs a terminal to confirm; add -y to skip the confirmation")
 		}
+		s := mustFind(all, target)
 		var t *tty
 		if !yes {
 			t = openTTY()
 		}
-		msg, ok := remove(all, target, yes, t.confirm)
+		msg, ok := remove(all, s, yes, t.confirm)
 		if t != nil {
 			t.close()
 		}
@@ -196,7 +198,7 @@ func main() {
 		}
 		fmt.Println(msg)
 	case "-r", "--rename":
-		msg, ok := rename(all, target, title)
+		msg, ok := rename(mustFind(all, target), title)
 		if !ok {
 			die("%s", msg)
 		}
@@ -208,7 +210,7 @@ func main() {
 			list(all, 10)
 		}
 	default:
-		resume(all, arg)
+		resume(mustFind(all, arg))
 	}
 }
 
@@ -374,7 +376,18 @@ func find(all []*session, prefix string) (*session, error) {
 			return nil, fmt.Errorf("%s matches %d sessions, use more of the ID", prefix, len(m))
 		}
 	}
+	if len(m) > 1 {
+		return nil, fmt.Errorf("session %s is in %d project folders; pick one in the claude-resume picker", m[0].id, len(m))
+	}
 	return m[0], nil
+}
+
+func mustFind(all []*session, prefix string) *session {
+	s, err := find(all, prefix)
+	if err != nil {
+		die("%s", err)
+	}
+	return s
 }
 
 func tilde(p string) string {
@@ -536,11 +549,7 @@ func human(n int64) string {
 	return fmt.Sprintf("%.0f%c", math.Ceil(f), "KMGT"[i-1])
 }
 
-func remove(all []*session, prefix string, yes bool, ask func(string, []line) bool) (string, bool) {
-	s, err := find(all, prefix)
-	if err != nil {
-		return err.Error(), false
-	}
+func remove(all []*session, s *session, yes bool, ask func(string, []line) bool) (string, bool) {
 	if !isUUID(s.id) {
 		return "Not deleted: unexpected session file " + s.path, false
 	}
@@ -551,6 +560,11 @@ func remove(all []*session, prefix string, yes bool, ask func(string, []line) bo
 		s.load()
 	}
 	paths := files(s)
+	for _, o := range all {
+		if o != s && o.id == s.id {
+			paths = slices.DeleteFunc(paths, func(p string) bool { return filepath.Dir(p) != filepath.Dir(s.path) })
+		}
+	}
 	if len(paths) == 0 {
 		return "Not deleted: no files found for session " + s.id, false
 	}
@@ -594,11 +608,7 @@ func remove(all []*session, prefix string, yes bool, ask func(string, []line) bo
 	return "Deleted \"" + name + "\".", true
 }
 
-func rename(all []*session, prefix, title string) (string, bool) {
-	s, err := find(all, prefix)
-	if err != nil {
-		return err.Error(), false
-	}
+func rename(s *session, title string) (string, bool) {
 	if title = strings.TrimSpace(squeeze(title)); title == "" {
 		return "Not renamed: the title is empty.", false
 	}
@@ -634,11 +644,7 @@ func rename(all []*session, prefix, title string) (string, bool) {
 	return "Renamed to \"" + title + "\".", true
 }
 
-func resume(all []*session, prefix string) {
-	s, err := find(all, prefix)
-	if err != nil {
-		die("%s", err)
-	}
+func resume(s *session) {
 	cwd := ""
 	eachLine(s.path, func(n int, _ []byte) bool { return n < 100 }, func(_ int, b []byte) bool {
 		var r record
@@ -647,7 +653,7 @@ func resume(all []*session, prefix string) {
 		return cwd == ""
 	})
 	if cwd == "" {
-		die("no folder recorded for session %s", prefix)
+		die("no folder recorded for session %s", s.id)
 	}
 	if os.Chdir(cwd) != nil {
 		die("folder %s no longer exists", cwd)
