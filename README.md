@@ -7,43 +7,38 @@ List all your Claude Code sessions and resume them in the folder they were start
 
 ## Install
 
+macOS and Linux:
+
 ```
 curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.sh | bash
 ```
 
-The installer puts `claude-resume` in `~/.local/bin` and installs `jq` and `fzf` if they are missing. It finds the package manager on its own (apt, dnf, pacman, zypper, apk or Homebrew) and uses `sudo` for everything except Homebrew. To install somewhere else, set `PREFIX` to a folder you can write to; the script goes in `$PREFIX/bin`.
-
-To install from a clone instead:
+Windows (PowerShell):
 
 ```
-git clone https://github.com/csmarvz/claude-resume.git
-cd claude-resume
-./install.sh
+irm https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.ps1 | iex
 ```
 
-Requirements: bash (3.2 or later, so the macOS default works), `jq`, and the `claude` CLI to resume sessions. `fzf` is optional; the picker needs fzf 0.53 or later for the folder filter and its current layout, and falls back to a simpler version with older releases.
+`claude-resume` is a single program with no dependencies. The installers download the build for your system from the latest GitHub release: on macOS and Linux into `~/.local/bin` (set `PREFIX` to install into `$PREFIX/bin` instead), on Windows into `%LOCALAPPDATA%\Programs\claude-resume`, which they add to your PATH. You can also download a binary from the [releases page](https://github.com/csmarvz/claude-resume/releases) yourself, or build it with Go 1.26 or later: `go install github.com/csmarvz/claude-resume@latest`.
+
+The only other requirement is the `claude` CLI, to resume sessions.
 
 ## Updating
 
-Run the install command again; it replaces the installed script with the latest version:
+Run the install command again; it replaces the installed program with the latest release. If you installed with `go install`, run that again.
 
-```
-curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.sh | bash
-```
+### Upgrading from the bash version
 
-If you installed from a clone, run `git pull` and then `./install.sh` in it. The installer copies the script, so pulling alone does not change the installed copy.
+Versions before 2.0 were a bash script that needed `jq` and `fzf`. To switch to the new program:
 
-### Updating fzf
-
-The installer only installs `fzf` when it is missing and never upgrades it, and distribution packages are often older than 0.53 (Ubuntu 24.04 ships 0.44). Check your version with `fzf --version`. To get a current release:
-
-- Homebrew (macOS or Linux): `brew install fzf`, or `brew upgrade fzf` if Homebrew already installed it.
-- Any system with git: `git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf && ~/.fzf/install`. The fzf installer downloads the binary and asks before it edits your shell profile.
+1. Run the install command above again. If you installed with a custom `PREFIX`, set the same one. The new program replaces the script at the same path, even when that path is a symlink into a clone of this repository, so aliases such as `cr` keep working.
+2. Check that it worked: `claude-resume -h` should no longer mention fzf.
+3. Optionally remove `jq` and `fzf` if nothing else uses them, for example with `sudo apt remove jq fzf` or `brew uninstall jq fzf`.
 
 ## Usage
 
 ```
-claude-resume              pick a session with fzf, or list the last 10 without it
+claude-resume              pick a session, or list the last 10 outside a terminal
 claude-resume -a           list all sessions (--all)
 claude-resume <id>         resume a session in its folder (a unique ID prefix is enough)
 claude-resume -d <id>      delete a session after a confirmation (--delete)
@@ -51,7 +46,7 @@ claude-resume -d -y <id>   delete without asking; needs the full session ID (--y
 claude-resume -h           show help (--help)
 ```
 
-The picker opens when `fzf` is installed and the script runs in a terminal. Type to filter by date, title, folder or ID, move with the arrow keys, and press Enter to resume. The pane below the list shows the highlighted session's last reply and every prompt you sent in it; scroll it with Shift+Up and Shift+Down. Without `fzf`, or when input or output is a pipe or a file, the script prints the last 10 sessions instead; add `-a` for all of them.
+The picker opens when `claude-resume` runs in a terminal. Type to filter by date, title, folder or ID: each word you type has to appear in the line, its letters in order but not necessarily next to each other, and a word with a capital letter is matched case-sensitively. Move with the arrow keys and press Enter to resume. The pane below the list shows the highlighted session's last reply and every prompt you sent in it; scroll it with Shift+Up and Shift+Down, and hide or show it with Ctrl-Space. Ctrl-A lists the folders that have sessions; pick one to see only its sessions, and press Esc to go back to the folder list, then to all sessions. When input or output is a pipe or a file, `claude-resume` prints the last 10 sessions instead; add `-a` for all of them.
 
 Each line shows the last activity, title, working directory and session ID. The title is the name you gave the session with `/rename`, otherwise the title Claude Code generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
 
@@ -71,11 +66,11 @@ Claude Code also deletes old transcripts on its own: by default, sessions untouc
 rm "${PREFIX:-$HOME/.local}/bin/claude-resume"
 ```
 
-`jq` and `fzf` stay installed.
+On Windows, delete the `%LOCALAPPDATA%\Programs\claude-resume` folder and remove it from your PATH.
 
 ## Caveat
 
-The script reads Claude Code's session files directly. Their format is not a public API, so a Claude Code update can break it.
+`claude-resume` reads Claude Code's session files directly. Their format is not a public API, so a Claude Code update can break it.
 
 ## License
 

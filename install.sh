@@ -1,49 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_raw=https://raw.githubusercontent.com/csmarvz/claude-resume/main
 bin_dir=${PREFIX:-$HOME/.local}/bin
 
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
-pkg_install() {
-  local sudo=
-  if (( EUID != 0 )) && ! command -v brew >/dev/null; then
-    command -v sudo >/dev/null || die "need root or sudo to install $*"
-    sudo=sudo
-  fi
-  if command -v brew >/dev/null; then brew install "$@"
-  elif command -v apt-get >/dev/null; then $sudo apt-get update -qq && $sudo apt-get install -y "$@"
-  elif command -v dnf >/dev/null; then $sudo dnf install -y "$@"
-  elif command -v pacman >/dev/null; then $sudo pacman -S --needed --noconfirm "$@"
-  elif command -v zypper >/dev/null; then $sudo zypper install -y "$@"
-  elif command -v apk >/dev/null; then $sudo apk add "$@"
-  else return 1
-  fi
-}
-
 main() {
-  local missing=() dep src tmp
-  for dep in jq fzf; do
-    command -v "$dep" >/dev/null || missing+=("$dep")
-  done
-
-  if (( ${#missing[@]} )); then
-    say "installing ${missing[*]}"
-    pkg_install "${missing[@]}" || die "could not install ${missing[*]}; install them manually and re-run"
-  fi
+  local os arch tmp
+  case $(uname -s) in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    *) die "unsupported system $(uname -s); on Windows, use install.ps1 (see the README)" ;;
+  esac
+  case $(uname -m) in
+    x86_64|amd64) arch=amd64 ;;
+    arm64|aarch64) arch=arm64 ;;
+    *) die "unsupported processor $(uname -m)" ;;
+  esac
 
   mkdir -p "$bin_dir"
-  src="$(dirname "${BASH_SOURCE[0]:-}")/claude-resume"
-  if [[ -n ${BASH_SOURCE[0]:-} && -f $src ]]; then
-    install -m 755 "$src" "$bin_dir/claude-resume"
-  else
-    tmp="$bin_dir/.claude-resume.tmp"
-    curl -fsSL "$repo_raw/claude-resume" -o "$tmp" || { rm -f "$tmp"; die "download failed"; }
-    chmod 755 "$tmp"
-    mv "$tmp" "$bin_dir/claude-resume"
-  fi
+  tmp="$bin_dir/.claude-resume.tmp"
+  curl -fsSL "https://github.com/csmarvz/claude-resume/releases/latest/download/claude-resume-$os-$arch" -o "$tmp" ||
+    { rm -f "$tmp"; die "download failed"; }
+  chmod 755 "$tmp"
+  mv "$tmp" "$bin_dir/claude-resume"
   say "installed $bin_dir/claude-resume"
 
   case ":$PATH:" in
@@ -53,13 +34,6 @@ main() {
   esac
 
   command -v claude >/dev/null || say "note: the claude CLI was not found; install Claude Code to resume sessions"
-
-  local v
-  v=$(fzf --version 2>/dev/null) || v=
-  if [[ $v =~ ^0\.([0-9]+)\. ]] && (( BASH_REMATCH[1] < 53 )); then
-    say "note: fzf ${v%% *} works, but the folder filter and the newer picker layout need fzf 0.53 or later"
-    say "      to update fzf, see https://github.com/csmarvz/claude-resume#updating-fzf"
-  fi
 }
 
 main "$@"
