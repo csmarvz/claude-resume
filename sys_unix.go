@@ -28,3 +28,7 @@ func isClaude(pid int) bool {
 	out, err := exec.Command("ps", "-ww", "-p", strconv.Itoa(pid), "-o", "args=").Output()
 	return err == nil && strings.Contains(strings.ToLower(string(out)), "claude")
 }
+
+func replace(tmp, exe string) error { return os.Rename(tmp, exe) }
+
+func removeOld() {}

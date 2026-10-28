@@ -22,7 +22,7 @@ irm https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.ps1 | i
 
 `claude-resume` is a single program with no dependencies. The installers download the build for your system from the latest GitHub release: on macOS and Linux into `~/.local/bin` (set `PREFIX` to install into `$PREFIX/bin` instead), on Windows into `%LOCALAPPDATA%\Programs\claude-resume`, which they add to your PATH. You can also download a binary from the [releases page](https://github.com/csmarvz/claude-resume/releases) yourself, or build it with Go 1.26 or later: `go install github.com/csmarvz/claude-resume@latest`.
 
-The only other requirement is the `claude` CLI, to resume sessions.
+The only other requirement is the `claude` CLI, to resume sessions. Updates use the system `curl`, which ships with macOS, Windows 10 and later, and most Linux distributions.
 
 ## Usage
 
@@ -32,6 +32,8 @@ claude-resume -a           list all sessions (--all)
 claude-resume <id>         resume a session in its folder (a unique ID prefix is enough)
 claude-resume -d <id>      delete a session after a confirmation (--delete)
 claude-resume -d -y <id>   delete without asking; needs the full session ID (--yes)
+claude-resume update       install the latest release
+claude-resume -v           show the installed version (--version)
 claude-resume -h           show help (--help)
 ```
 
@@ -54,7 +56,11 @@ Claude Code also deletes old transcripts on its own: by default, sessions untouc
 
 ## Updating
 
-Run the install command again; it replaces the installed program with the latest release. If you installed with `go install`, run that again.
+Run `claude-resume update`. It downloads the latest release for your system, checks it against the release's SHA-256 checksums and replaces itself; if anything fails, the installed version stays as it was.
+
+Once a day, the picker asks GitHub in the background whether a newer release is out, and shows a line at the top when there is one. Set `CLAUDE_RESUME_NO_UPDATE_CHECK=1` to turn that check off.
+
+Version 0.0.1-alpha has no `update` command: to leave it, run the install command once more.
 
 ### Upgrading from the bash version
 

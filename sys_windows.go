@@ -41,3 +41,22 @@ func isClaude(pid int) bool {
 	p.Release()
 	return true
 }
+
+// replace moves the running program aside first, because Windows does not let a running .exe be overwritten.
+func replace(tmp, exe string) error {
+	os.Remove(exe + ".old")
+	if err := os.Rename(exe, exe+".old"); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, exe); err != nil {
+		os.Rename(exe+".old", exe)
+		return err
+	}
+	return nil
+}
+
+func removeOld() {
+	if exe, err := os.Executable(); err == nil {
+		os.Remove(exe + ".old")
+	}
+}

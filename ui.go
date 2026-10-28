@@ -426,7 +426,7 @@ func pick(all []*session) {
 		}
 		return nil
 	}
-	dir, msg, choose := "", "", false
+	dir, msg, choose, note := "", "", false, notice()
 	for {
 		if choose {
 			f := &view{prompt: "folder> ", items: folders(all), foot: "  ↑↓ select · ENTER show its sessions · ESC all sessions"}
@@ -453,6 +453,9 @@ func pick(all []*session) {
 		}
 		if msg != "" {
 			v.header = append(v.header, msg)
+		}
+		if note != "" {
+			v.header = append(v.header, note)
 		}
 		if len(v.header) == 0 {
 			v.header = []string{""}

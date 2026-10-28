@@ -23,6 +23,8 @@ const usageText = `usage: claude-resume              pick a session, or list the
        claude-resume -a           list all sessions (--all)
        claude-resume <id>         resume a session in its folder (a unique ID prefix is enough)
        claude-resume -d [-y] <id> delete a session for good; asks first unless -y (--delete, --yes)
+       claude-resume update       install the latest release
+       claude-resume -v           show the installed version (--version)
 `
 
 var (
@@ -99,6 +101,12 @@ func main() {
 	switch {
 	case arg == "-h" || arg == "--help":
 		usage(0)
+	case arg == "-v" || arg == "--version":
+		fmt.Println("claude-resume " + currentVersion())
+		return
+	case arg == "update":
+		update()
+		return
 	case arg == "" || arg == "-a" || arg == "--all":
 	case arg == "-d" || arg == "--delete":
 		for _, a := range args[1 : len(args)-1] {
@@ -121,6 +129,7 @@ func main() {
 		usage(1)
 	}
 
+	removeOld()
 	home, _ = os.UserHomeDir()
 	config = os.Getenv("CLAUDE_CONFIG_DIR")
 	if config == "" {
