@@ -32,6 +32,13 @@ func curl(args ...string) ([]byte, error) {
 	return out, err
 }
 
+func label() string {
+	if v := currentVersion(); v != "dev" {
+		return "v" + v
+	}
+	return "dev"
+}
+
 // latest reads the newest release tag from the redirect of /releases/latest, which needs no API token.
 func latest() (string, error) {
 	out, err := curl("-I", "--max-time", "15", "-o", os.DevNull, "-w", "%{redirect_url}", repo+"/releases/latest")
@@ -63,7 +70,7 @@ func remember(tag string) {
 	}
 }
 
-// notice returns the picker line for a newer release found by an earlier check,
+// notice returns the footer text for a newer release found by an earlier check,
 // and refreshes that check in the background when it is a day old.
 func notice() string {
 	f := cacheFile()
@@ -82,7 +89,7 @@ func notice() string {
 	if v == "" || v == currentVersion() {
 		return ""
 	}
-	return fmt.Sprintf("claude-resume %s is available (you have %s): run claude-resume update", v, currentVersion())
+	return label() + " → v" + v + ": run claude-resume update"
 }
 
 func update() {

@@ -380,8 +380,16 @@ func (t *tty) draw(v *view) {
 		}
 		if i == h-1 {
 			s = "\x1b[38;5;145m" + clip(v.foot, w) + "\x1b[0m"
+			right, color := label(), "\x1b[38;5;243m"
+			if note != "" && w >= width(note)+30 {
+				right, color = note, "\x1b[33m"
+			}
+			if w >= width(right)+30 {
+				f := clip(v.foot, w-width(right)-2)
+				s = "\x1b[38;5;145m" + f + strings.Repeat(" ", w-width(f)-width(right)) + color + right + "\x1b[0m"
+			}
 		}
-		fmt.Fprintf(b, "\x1b[%d;1H%s\x1b[K", i+1, s)
+		fmt.Fprintf(b, "\x1b[%d;1H\x1b[K%s", i+1, s)
 	}
 	fmt.Fprintf(b, "\x1b[1;%dH\x1b[?25h", min(w, width(v.prompt)+v.cur+1))
 	b.Flush()
@@ -399,7 +407,10 @@ func folders(all []*session) []string {
 	return out
 }
 
+var note string
+
 func pick(all []*session) {
+	note = notice()
 	t := openTTY()
 	loadAll(all)
 	var mu sync.Mutex
@@ -426,7 +437,7 @@ func pick(all []*session) {
 		}
 		return nil
 	}
-	dir, msg, choose, note := "", "", false, notice()
+	dir, msg, choose := "", "", false
 	for {
 		if choose {
 			f := &view{prompt: "folder> ", items: folders(all), foot: "  ↑↓ select · ENTER show its sessions · ESC all sessions"}
@@ -453,9 +464,6 @@ func pick(all []*session) {
 		}
 		if msg != "" {
 			v.header = append(v.header, msg)
-		}
-		if note != "" {
-			v.header = append(v.header, note)
 		}
 		if len(v.header) == 0 {
 			v.header = []string{""}
@@ -557,7 +565,7 @@ func (t *tty) dialog(lines []line, sel int) {
 		if width(s) > inner {
 			s = cut(s, inner-1) + "…"
 		}
-		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m \x1b[%sm%s\x1b[0m\x1b[%d;%dH\x1b[31m│\x1b[0m\x1b[K", r, left, style, s, r, left+w-1)
+		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m \x1b[%sm%s\x1b[0m\x1b[%d;%dH\x1b[31m│\x1b[0m", r, left, style, s, r, left+w-1)
 		r++
 	}
 	label, hint := " Delete session ", " ←→ select · ENTER choose · ESC cancel "
@@ -590,7 +598,7 @@ func (t *tty) dialog(lines []line, sel int) {
 	} else {
 		fmt.Fprintf(b, "%s%s\x1b[1;7;31m%s\x1b[0m", b0, gap, b1)
 	}
-	fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m\x1b[K", r, left+w-1)
+	fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m", r, left+w-1)
 	r++
 	if pad == 1 {
 		row("0", "")
