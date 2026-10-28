@@ -238,13 +238,13 @@ func (t *tty) run(v *view) (string, int) {
 		case "ctrl-space":
 			v.hide = !v.hide
 		case "left":
-			v.cur = max(0, v.cur-1)
+			v.cur, v.dim = max(0, v.cur-1), false
 		case "right":
-			v.cur = min(len(v.query), v.cur+1)
+			v.cur, v.dim = min(len(v.query), v.cur+1), false
 		case "home":
-			v.cur = 0
+			v.cur, v.dim = 0, false
 		case "end":
-			v.cur = len(v.query)
+			v.cur, v.dim = len(v.query), false
 		case "bs":
 			if v.cur > 0 {
 				v.query = append(v.query[:v.cur-1], v.query[v.cur:]...)
@@ -406,7 +406,9 @@ func (t *tty) draw(v *view) {
 		}
 		fmt.Fprintf(b, "\x1b[%d;1H\x1b[K%s", i+1, s)
 	}
-	fmt.Fprintf(b, "\x1b[1;%dH\x1b[?25h", min(w, width(v.prompt)+v.cur+1))
+	if !v.dim {
+		fmt.Fprintf(b, "\x1b[1;%dH\x1b[?25h", min(w, width(v.prompt)+v.cur+1))
+	}
 	b.Flush()
 }
 
