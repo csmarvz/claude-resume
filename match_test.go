@@ -55,3 +55,25 @@ func TestNewer(t *testing.T) {
 		}
 	}
 }
+
+func TestWidth(t *testing.T) {
+	for _, c := range []struct {
+		s    string
+		w    int
+		cut4 string
+	}{
+		{"abcdef", 6, "abcd"},
+		{"日本語です", 10, "日本"},
+		{"a日b", 4, "a日b"},
+		{"🚀go", 4, "🚀go"},
+		{"éte", 3, "éte"},
+		{"✔️ok", 3, "✔️ok"},
+	} {
+		if got := width(c.s); got != c.w {
+			t.Errorf("width(%q) = %d, want %d", c.s, got, c.w)
+		}
+		if got := cut(c.s, 4); got != c.cut4 {
+			t.Errorf("cut(%q, 4) = %q, want %q", c.s, got, c.cut4)
+		}
+	}
+}

@@ -312,10 +312,14 @@ func wrap(lines []line, w int) []line {
 	w = max(w, 3)
 	var out []line
 	for _, l := range lines {
-		r := []rune(l.text)
-		out = append(out, line{l.style, string(r[:min(len(r), w)])})
-		for r = r[min(len(r), w):]; len(r) > 0; r = r[min(len(r), w-2):] {
-			out = append(out, line{"cont" + l.style, string(r[:min(len(r), w-2)])})
+		s := cut(l.text, w)
+		out = append(out, line{l.style, s})
+		for rest := l.text[len(s):]; rest != ""; rest = rest[len(s):] {
+			if s = cut(rest, w-2); s == "" {
+				_, n := utf8.DecodeRuneInString(rest)
+				s = rest[:n]
+			}
+			out = append(out, line{"cont" + l.style, s})
 		}
 	}
 	return out
@@ -420,7 +424,7 @@ func (t *tty) draw(v *view) {
 		fmt.Fprintf(b, "\x1b[%d;1H\x1b[K%s", i+1, s)
 	}
 	if !v.dim {
-		fmt.Fprintf(b, "\x1b[1;%dH\x1b[?25h", min(w, width(v.prompt)+v.cur+1))
+		fmt.Fprintf(b, "\x1b[1;%dH\x1b[?25h", min(w, width(v.prompt)+width(string(v.query[:v.cur]))+1))
 	}
 	b.Flush()
 }
