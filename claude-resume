@@ -306,29 +306,32 @@ resume() {
 }
 
 pick() {
-  local msg= query= pos=0 ver=0 v rows out rc key id rest opts head top=()
-  local hint='  Type to search · ↑↓ select · ENTER resume session · CTRL-D delete · ESC quit'
+  local msg= query= pos=0 ver=0 hide= v rows out rc key id rest opts head top=()
+  local hint='  Type to search · ↑↓ select · ENTER resume session · CTRL-D delete · CTRL-SPACE preview · ESC quit'
   v=$(fzf --version 2>/dev/null) || v=
   if [[ $v =~ ^([0-9]+)\.([0-9]+) ]]; then ver=$(( BASH_REMATCH[1] * 1000 + BASH_REMATCH[2] )); fi
   while :; do
     rows=$(list "${#sorted[@]}")
     opts=()
     if (( ver >= 38 && pos > 1 )); then opts=(--bind "load:pos($pos)"); fi
-    if (( ver >= 46 )); then
-      opts+=(--border=bottom --border-label-pos=1:bottom
+    if (( ver >= 53 )); then
+      opts+=(--bind 'enter:print()+accept'
+        --bind 'ctrl-d:transform:[ -n "$FZF_PREVIEW_LINES" ] && echo "print(ctrl-d)+accept" || echo "print(ctrl-d-hidden)+accept"'
+        --border=bottom --border-label-pos=1:bottom
         --bind "start,resize:transform-border-label:printf '%s%*s' '$hint' \$((FZF_COLUMNS > ${#hint} ? FZF_COLUMNS - ${#hint} : 0)) ''")
       top=(--bind $'up:transform:(( FZF_POS > 1 )) && echo \'up+change-prompt(\e[2msearch> \e[0m)\' || echo \'change-prompt(search> )\'')
       head=$msg
     else
+      opts+=(--expect ctrl-d)
       head=$hint${msg:+$'\n'$msg}
     fi
     rc=0
     out=$(printf '%s\n' "$rows" | SHELL=$BASH fzf --no-sort --no-multi --layout=reverse --prompt='search> ' \
-      --print-query --query "$query" --expect ctrl-d ${opts[@]+"${opts[@]}"} \
+      --print-query --query "$query" ${opts[@]+"${opts[@]}"} \
       --bind $'up:up+change-prompt(\e[2msearch> \e[0m),down:down+change-prompt(\e[2msearch> \e[0m)' \
-      --bind 'change:change-prompt(search> )' ${top[@]+"${top[@]}"} \
+      --bind 'change:change-prompt(search> ),ctrl-space:toggle-preview' ${top[@]+"${top[@]}"} \
       --header "$head" \
-      --preview "$(printf '%q' "$self") --preview {-1}" --preview-window 'down,60%,wrap') || rc=$?
+      --preview "$(printf '%q' "$self") --preview {-1}" --preview-window "down,60%,wrap$hide") || rc=$?
     case $rc in
       0) ;;
       1) query=${out%%$'\n'*}; pos=0; continue ;;
@@ -341,9 +344,10 @@ pick() {
     key=${rest##*$'\n'}
     rest=${rest%$'\n'*}
     query=${rest##*$'\n'}
-    if [[ $key != ctrl-d ]]; then
+    if [[ $key != ctrl-d* ]]; then
       resume "$id"
     else
+      hide=${key#ctrl-d}; hide=${hide:+,hidden}
       pos=$(printf '%s\n' "$rows" | FZF_DEFAULT_OPTS= fzf --no-sort --filter "$query" | grep -n -F "$id" | head -n 1 | cut -d: -f1) || pos=0
       delete "$id" || true
       scan
