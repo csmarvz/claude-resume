@@ -306,17 +306,25 @@ resume() {
 }
 
 pick() {
-  local msg= query= pos=0 canpos= v rows out rc key id rest opts
+  local msg= query= pos=0 ver=0 v rows out rc key id rest opts head
+  local hint='  type to search · ↑↓ select · ENTER resume session · CTRL-D delete · ESC quit'
   v=$(fzf --version 2>/dev/null) || v=
-  if [[ $v =~ ^([0-9]+)\.([0-9]+) ]] && (( BASH_REMATCH[1] > 0 || BASH_REMATCH[2] >= 38 )); then canpos=yes; fi
+  if [[ $v =~ ^([0-9]+)\.([0-9]+) ]]; then ver=$(( BASH_REMATCH[1] * 1000 + BASH_REMATCH[2] )); fi
   while :; do
     rows=$(list "${#sorted[@]}")
     opts=()
-    if [[ -n $canpos ]] && (( pos > 1 )); then opts=(--bind "load:pos($pos)"); fi
+    if (( ver >= 38 && pos > 1 )); then opts=(--bind "load:pos($pos)"); fi
+    if (( ver >= 46 )); then
+      opts+=(--border=bottom --border-label-pos=1:bottom
+        --bind "start,resize:transform-border-label:printf '%s%*s' '$hint' \$((FZF_COLUMNS > ${#hint} ? FZF_COLUMNS - ${#hint} : 0)) ''")
+      head=$msg
+    else
+      head=$hint${msg:+$'\n'$msg}
+    fi
     rc=0
     out=$(printf '%s\n' "$rows" | fzf --no-sort --no-multi --layout=reverse --prompt='search> ' \
       --print-query --query "$query" --expect ctrl-d ${opts[@]+"${opts[@]}"} \
-      --header "type to search · ↑↓ select · ENTER resume session · CTRL-D delete · ESC quit${msg:+$'\n'$msg}" \
+      --header "$head" \
       --preview "$(printf '%q' "$self") --preview {-1}" --preview-window 'down,60%,wrap') || rc=$?
     case $rc in
       0) ;;
