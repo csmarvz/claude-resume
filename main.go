@@ -74,10 +74,22 @@ func isUUID(s string) bool {
 	return len(s) == 36 && isHex(s) && strings.Count(s, "-") == 4 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-'
 }
 
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return ' '
+		}
+		if r != '\n' && unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func squeeze(s string) string {
 	var b strings.Builder
 	space := false
-	for _, r := range s {
+	for _, r := range printable(s) {
 		if unicode.IsSpace(r) {
 			if !space {
 				b.WriteByte(' ')
@@ -133,6 +145,9 @@ func main() {
 			die("-y needs the full session ID")
 		}
 	case arg == "-r" || arg == "--rename":
+		if len(args) < 4 {
+			usage(1)
+		}
 		target, title = args[1], strings.Join(args[2:len(args)-1], " ")
 		if !isHex(target) || strings.TrimSpace(title) == "" {
 			usage(1)
@@ -205,7 +220,7 @@ func scan() []*session {
 		for _, f := range files {
 			name := f.Name()
 			id := strings.TrimSuffix(name, ".jsonl")
-			if ok, _ := filepath.Match("????????-????-????-????-????????????.jsonl", name); !ok || !f.Type().IsRegular() {
+			if !strings.HasSuffix(name, ".jsonl") || !isUUID(id) || !f.Type().IsRegular() {
 				continue
 			}
 			info, err := f.Info()
@@ -364,16 +379,16 @@ func find(all []*session, prefix string) (*session, error) {
 
 func tilde(p string) string {
 	if home != "" && (p == home || strings.HasPrefix(p, home+string(filepath.Separator))) {
-		return "~" + p[len(home):]
+		p = "~" + p[len(home):]
 	}
-	return p
+	return squeeze(p)
 }
 
 func date(s *session) string { return s.mod.Format("2006-01-02 15:04") }
 
 func cut(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n])
+	if r := []rune(s); len(r) > max(n, 0) {
+		return string(r[:max(n, 0)])
 	}
 	return s
 }
@@ -416,14 +431,14 @@ func preview(s *session) []line {
 		var r record
 		json.Unmarshal(b, &r)
 		if r.GitBranch != "" {
-			branch = r.GitBranch
+			branch = squeeze(r.GitBranch)
 		}
 		if u := r.Message.Usage; u.Input+u.CacheCreate+u.CacheRead > 0 {
 			tokens = u.Input + u.CacheCreate + u.CacheRead
 		}
 		if r.Type == "assistant" && bytes.HasPrefix(r.Message.Content, []byte("[")) {
 			if t, _ := text(r.Message.Content, "\n"); t != "" {
-				reply = t
+				reply = printable(t)
 			}
 		}
 		if isUser && !r.IsMeta && !r.IsCompactSummary {
@@ -557,7 +572,7 @@ func remove(all []*session, prefix string, yes bool, ask func(string, []line) bo
 			n := size(p)
 			total += n
 			rel, _ := filepath.Rel(config, p)
-			lines = append(lines, line{"", fmt.Sprintf("  %6s  %s", human(n), rel)})
+			lines = append(lines, line{"", fmt.Sprintf("  %6s  %s", human(n), squeeze(rel))})
 		}
 		if !ask(fmt.Sprintf("Delete this session for good? %sB · Y delete · any other key cancels", human(total)), lines) {
 			return "Cancelled, nothing was deleted.", false

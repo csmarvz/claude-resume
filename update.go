@@ -53,7 +53,7 @@ func latest() (string, error) {
 	return loc[i+5:], nil
 }
 
-func get(url string) ([]byte, error) { return curl("-L", url) }
+func get(url string) ([]byte, error) { return curl("-L", "--max-time", "60", url) }
 
 func cacheFile() string {
 	d, err := os.UserCacheDir()
