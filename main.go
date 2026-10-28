@@ -172,7 +172,7 @@ func main() {
 		if !yes {
 			t = openTTY()
 		}
-		msg, ok := remove(all, target, yes, t)
+		msg, ok := remove(all, target, yes, t.confirm)
 		if t != nil {
 			t.close()
 		}
@@ -521,7 +521,7 @@ func human(n int64) string {
 	return fmt.Sprintf("%.0f%c", math.Ceil(f), "KMGT"[i-1])
 }
 
-func remove(all []*session, prefix string, yes bool, t *tty) (string, bool) {
+func remove(all []*session, prefix string, yes bool, ask func(string, []line) bool) (string, bool) {
 	s, err := find(all, prefix)
 	if err != nil {
 		return err.Error(), false
@@ -549,15 +549,17 @@ func remove(all []*session, prefix string, yes bool, t *tty) (string, bool) {
 			title = "(untitled)"
 		}
 		lines := []line{
-			{"1;31", "WARNING: this permanently deletes the session below. It cannot be undone."}, {},
 			{"1", title}, {"2", tilde(s.cwd) + "  ·  " + date(s) + "  ·  " + s.id}, {},
 			{"", "Files to delete in " + tilde(config) + ":"},
 		}
+		var total int64
 		for _, p := range paths {
+			n := size(p)
+			total += n
 			rel, _ := filepath.Rel(config, p)
-			lines = append(lines, line{"", fmt.Sprintf("  %6s  %s", human(size(p)), rel)})
+			lines = append(lines, line{"", fmt.Sprintf("  %6s  %s", human(n), rel)})
 		}
-		if !t.confirm(lines) {
+		if !ask(fmt.Sprintf("Delete this session for good? %sB · Y delete · any other key cancels", human(total)), lines) {
 			return "Cancelled, nothing was deleted.", false
 		}
 	}

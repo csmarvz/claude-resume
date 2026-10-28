@@ -166,6 +166,7 @@ type view struct {
 	preview func(i int) []line
 	keys    map[string]bool
 	edit    bool
+	warn    bool
 
 	query     []rune
 	cur       int
@@ -353,7 +354,11 @@ func (t *tty) draw(v *view) {
 		}
 		s := clip(v.items[v.shown[i]], w-2)
 		if i == v.sel {
-			rows = append(rows, "\x1b[1;38;5;161;48;5;236m▌\x1b[0;48;5;236m \x1b[1;38;5;254m"+
+			bg := "236"
+			if v.warn {
+				bg = "52"
+			}
+			rows = append(rows, "\x1b[1;38;5;161;48;5;"+bg+"m▌\x1b[0;48;5;"+bg+"m \x1b[1;38;5;254m"+
 				highlight(s, v.pos[i], "\x1b[38;5;151m", "\x1b[38;5;254m")+strings.Repeat(" ", max(0, w-2-width(s)))+"\x1b[0m")
 		} else {
 			rows = append(rows, "\x1b[38;5;236m▌\x1b[0m "+highlight(s, v.pos[i], "\x1b[38;5;108m", "\x1b[39m"))
@@ -362,7 +367,11 @@ func (t *tty) draw(v *view) {
 
 	if ph > 0 {
 		inner := w - 4
-		rows = append(rows, "\x1b[38;5;59m╭"+strings.Repeat("─", max(0, w-2))+"╮\x1b[0m")
+		fr := "\x1b[38;5;59m"
+		if v.warn {
+			fr = "\x1b[31m"
+		}
+		rows = append(rows, fr+"╭"+strings.Repeat("─", max(0, w-2))+"╮\x1b[0m")
 		var body []line
 		if len(v.shown) > 0 {
 			body = wrap(v.preview(v.shown[v.sel]), inner)
@@ -381,9 +390,9 @@ func (t *tty) draw(v *view) {
 			} else {
 				s = "\x1b[" + style + "m" + s
 			}
-			rows = append(rows, "\x1b[38;5;59m│\x1b[0m "+s+"\x1b[0m"+pad+" \x1b[38;5;59m│\x1b[0m")
+			rows = append(rows, fr+"│\x1b[0m "+s+"\x1b[0m"+pad+" "+fr+"│\x1b[0m")
 		}
-		rows = append(rows, "\x1b[38;5;59m╰"+strings.Repeat("─", max(0, w-2))+"╯\x1b[0m")
+		rows = append(rows, fr+"╰"+strings.Repeat("─", max(0, w-2))+"╯\x1b[0m")
 	}
 
 	b := t.out
@@ -394,14 +403,18 @@ func (t *tty) draw(v *view) {
 			s = rows[i]
 		}
 		if i == h-1 {
-			s = "\x1b[38;5;145m" + clip(v.foot, w) + "\x1b[0m"
+			fc := "\x1b[38;5;145m"
+			if v.warn {
+				fc = "\x1b[1;31m"
+			}
+			s = fc + clip(v.foot, w) + "\x1b[0m"
 			right, color := label(), "\x1b[38;5;243m"
 			if note != "" && w >= width(note)+30 {
 				right, color = note, "\x1b[33m"
 			}
 			if w >= width(right)+30 {
 				f := clip(v.foot, w-width(right)-2)
-				s = "\x1b[38;5;145m" + f + strings.Repeat(" ", w-width(f)-width(right)) + color + right + "\x1b[0m"
+				s = fc + f + "\x1b[0m" + strings.Repeat(" ", w-width(f)-width(right)) + color + right + "\x1b[0m"
 			}
 		}
 		fmt.Fprintf(b, "\x1b[%d;1H\x1b[K%s", i+1, s)
@@ -520,7 +533,22 @@ func pick(all []*session) {
 		case "ctrl-d":
 			t.drain()
 			var ok bool
-			msg, ok = remove(all, shown[i].id, false, t)
+			msg, ok = remove(all, shown[i].id, false, func(q string, lines []line) bool {
+				saved := *v
+				defer func() { *v = saved }()
+				v.preview, v.foot, v.warn, v.dim, v.hide, v.pscroll = func(int) []line { return lines }, q, true, true, false, 0
+				redraw := true
+				for {
+					if redraw || t.resized() {
+						t.draw(v)
+					}
+					k := t.read()
+					redraw = false
+					if k != "" && k != "wake" {
+						return k == "y" || k == "Y"
+					}
+				}
+			})
 			if ok {
 				for j, s := range all {
 					if s.id == shown[i].id {
@@ -538,7 +566,8 @@ func pick(all []*session) {
 	}
 }
 
-func (t *tty) confirm(lines []line) bool {
+func (t *tty) confirm(_ string, lines []line) bool {
+	lines = append([]line{{"1;31", "WARNING: this permanently deletes the session below. It cannot be undone."}, {}}, lines...)
 	t.drain()
 	sel, last, redraw := 0, time.Now(), true
 	for {
