@@ -24,18 +24,6 @@ irm https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.ps1 | i
 
 The only other requirement is the `claude` CLI, to resume sessions.
 
-## Updating
-
-Run the install command again; it replaces the installed program with the latest release. If you installed with `go install`, run that again.
-
-### Upgrading from the bash version
-
-Versions before 2.0 were a bash script that needed `jq` and `fzf`. To switch to the new program:
-
-1. Run the install command above again. If you installed with a custom `PREFIX`, set the same one. The new program replaces the script at the same path, even when that path is a symlink into a clone of this repository, so aliases such as `cr` keep working.
-2. Check that it worked: `claude-resume -h` should no longer mention fzf.
-3. Optionally remove `jq` and `fzf` if nothing else uses them, for example with `sudo apt remove jq fzf` or `brew uninstall jq fzf`.
-
 ## Usage
 
 ```
@@ -47,19 +35,34 @@ claude-resume -d -y <id>   delete without asking; needs the full session ID (--y
 claude-resume -h           show help (--help)
 ```
 
-The picker opens when `claude-resume` runs in a terminal. Type to filter by date, title, folder or ID: each word you type has to appear in the line, its letters in order but not necessarily next to each other, and a word with a capital letter is matched case-sensitively. Move with the arrow keys and press Enter to resume. The pane below the list shows the highlighted session's last reply and every prompt you sent in it; scroll it with Shift+Up and Shift+Down, and hide or show it with Ctrl-Space. Ctrl-A lists the folders that have sessions; pick one to see only its sessions, and press Esc to go back to the folder list, then to all sessions. When input or output is a pipe or a file, `claude-resume` prints the last 10 sessions instead; add `-a` for all of them.
+The title is the name you gave the session with `/rename`, otherwise the title claude generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
 
-Each line shows the last activity, title, working directory and session ID. The title is the name you gave the session with `/rename`, otherwise the title Claude Code generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
+You can:
+* Resume sessions
+* Preview sessions
+* Search sessions
+* Delete sessions
+* TODO Rename sessions
 
 ## Deleting sessions
-
-Press Ctrl-D in the picker, or run `claude-resume -d <id>`. A dialog shows the session and every path that will be removed, with CANCEL selected. Use the left and right arrows to switch to CONFIRM and press Enter; Esc or Ctrl-C cancels. In the picker you then land back on the same search and row.
 
 A delete removes the session's transcript, its folder of subagent and tool output, and its `file-history` and `session-env` entries. It leaves `~/.claude/history.jsonl`, the prompt history behind the up arrow in Claude Code, untouched. Sessions that are open in a running Claude Code process are refused.
 
 `-y` skips the dialog and works without a terminal, so you can script it. It only accepts a full session ID, never a prefix.
 
 Claude Code also deletes old transcripts on its own: by default, sessions untouched for 30 days (the `cleanupPeriodDays` setting).
+
+## Updating
+
+Run the install command again; it replaces the installed program with the latest release. If you installed with `go install`, run that again.
+
+### Upgrading from the bash version
+
+Versions before 2.0 were a bash script that needed `jq` and `fzf`. To switch to the new program:
+
+1. Run the install command above again. If you installed with a custom `PREFIX`, set the same one. The new program replaces the script at the same path, even when that path is a symlink into a clone of this repository, so aliases such as `cr` keep working.
+2. Check that it worked: `claude-resume -h` should no longer mention fzf.
+3. Optionally remove `jq` and `fzf` if nothing else uses them, for example with `sudo apt remove jq fzf` or `brew uninstall jq fzf`.
 
 ## Uninstall
 
