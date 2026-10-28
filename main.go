@@ -19,12 +19,13 @@ import (
 	"golang.org/x/term"
 )
 
-const usageText = `usage: claude-resume              pick a session, or list the last 10 outside a terminal
-       claude-resume -a           list all sessions (--all)
-       claude-resume <id>         resume a session in its folder (a unique ID prefix is enough)
-       claude-resume -d [-y] <id> delete a session for good; asks first unless -y (--delete, --yes)
-       claude-resume update       install the latest release
-       claude-resume -v           show the installed version (--version)
+const usageText = `usage: claude-resume                  pick a session, or list the last 10 outside a terminal
+       claude-resume -a               list all sessions (--all)
+       claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
+       claude-resume -r <id> <title>  rename a session (--rename)
+       claude-resume -d [-y] <id>     delete a session for good; asks first unless -y (--delete, --yes)
+       claude-resume update           install the latest release
+       claude-resume -v               show the installed version (--version)
 `
 
 var (
@@ -103,7 +104,7 @@ func die(format string, a ...any) {
 
 func main() {
 	args := append(os.Args[1:], "")
-	arg, target, yes := args[0], "", false
+	arg, target, title, yes := args[0], "", "", false
 	switch {
 	case arg == "-h" || arg == "--help":
 		usage(0)
@@ -130,6 +131,11 @@ func main() {
 		}
 		if yes && !isUUID(target) {
 			die("-y needs the full session ID")
+		}
+	case arg == "-r" || arg == "--rename":
+		target, title = args[1], strings.Join(args[2:len(args)-1], " ")
+		if !isHex(target) || strings.TrimSpace(title) == "" {
+			usage(1)
 		}
 	case strings.HasPrefix(arg, "-") || !isHex(arg):
 		usage(1)
@@ -170,6 +176,12 @@ func main() {
 		if t != nil {
 			t.close()
 		}
+		if !ok {
+			die("%s", msg)
+		}
+		fmt.Println(msg)
+	case "-r", "--rename":
+		msg, ok := rename(all, target, title)
 		if !ok {
 			die("%s", msg)
 		}
@@ -563,6 +575,46 @@ func remove(all []*session, prefix string, yes bool, t *tty) (string, bool) {
 		return "Only partly deleted \"" + name + "\", see the errors above.", false
 	}
 	return "Deleted \"" + name + "\".", true
+}
+
+func rename(all []*session, prefix, title string) (string, bool) {
+	s, err := find(all, prefix)
+	if err != nil {
+		return err.Error(), false
+	}
+	if title = strings.TrimSpace(squeeze(title)); title == "" {
+		return "Not renamed: the title is empty.", false
+	}
+	if pid := openPid(s.id); pid != "" {
+		return fmt.Sprintf("Not renamed: session %s is open in Claude Code (pid %s). Close it first.", s.id[:8], pid), false
+	}
+	st, err := os.Stat(s.path)
+	if err != nil {
+		return err.Error(), false
+	}
+	f, err := os.OpenFile(s.path, os.O_RDWR|os.O_APPEND, 0)
+	if err != nil {
+		return err.Error(), false
+	}
+	b, _ := json.Marshal(struct {
+		Type        string `json:"type"`
+		CustomTitle string `json:"customTitle"`
+		SessionId   string `json:"sessionId"`
+	}{"custom-title", title, s.id})
+	last := make([]byte, 1)
+	if n, _ := f.ReadAt(last, st.Size()-1); n == 1 && last[0] != '\n' {
+		b = append([]byte("\n"), b...)
+	}
+	_, err = f.Write(append(b, '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err.Error(), false
+	}
+	os.Chtimes(s.path, st.ModTime(), st.ModTime())
+	s.title = title
+	return "Renamed to \"" + title + "\".", true
 }
 
 func resume(all []*session, prefix string) {

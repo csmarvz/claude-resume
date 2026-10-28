@@ -100,7 +100,7 @@ var csi = map[string]string{
 var ctrl = map[byte]string{
 	0x00: "ctrl-space", 0x01: "ctrl-a", 0x02: "left", 0x03: "esc", 0x04: "ctrl-d", 0x05: "end", 0x06: "right",
 	0x08: "bs", 0x7f: "bs", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "down", 0x10: "up",
-	0x15: "ctrl-u", 0x17: "ctrl-w",
+	0x12: "ctrl-r", 0x15: "ctrl-u", 0x17: "ctrl-w",
 }
 
 // read returns the next key, "wake" when a preview has loaded, or "" after a quiet interval.
@@ -165,6 +165,7 @@ type view struct {
 	foot    string
 	preview func(i int) []line
 	keys    map[string]bool
+	edit    bool
 
 	query     []rune
 	cur       int
@@ -177,6 +178,9 @@ type view struct {
 
 func (v *view) filter() {
 	terms := strings.Fields(string(v.query))
+	if v.edit {
+		terms = nil
+	}
 	v.shown, v.pos = v.shown[:0], v.pos[:0]
 	for i, it := range v.items {
 		if p, ok := match(it, terms); ok {
@@ -207,7 +211,7 @@ func (t *tty) run(v *view) (string, int) {
 			if v.keys[k] {
 				return k, -1
 			}
-		case "enter", "ctrl-d":
+		case "enter", "ctrl-d", "ctrl-r":
 			if n > 0 && (k == "enter" || v.keys[k]) {
 				return k, v.shown[v.sel]
 			}
@@ -428,7 +432,7 @@ func pick(all []*session) {
 	cache := map[string][]line{}
 	loading := map[string]bool{}
 	var shown []*session
-	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true}}
+	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true}}
 	v.preview = func(i int) []line {
 		s := shown[i]
 		mu.Lock()
@@ -483,7 +487,7 @@ func pick(all []*session) {
 		if dir != "" {
 			esc = "folders"
 		}
-		v.foot = "  Type to search · ↑↓ select · ENTER resume · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
+		v.foot = "  Type to search · ↑↓ select · ENTER resume · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
 		k, i := t.run(v)
 		switch k {
 		case "esc":
@@ -497,6 +501,20 @@ func pick(all []*session) {
 		case "enter":
 			t.close()
 			resume(all, shown[i].id)
+		case "ctrl-r":
+			s := shown[i]
+			e := &view{prompt: "rename> ", items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(s.title),
+				preview: func(int) []line { return v.preview(i) }, foot: "  Type the new title · ENTER save · ESC cancel"}
+			e.cur = len(e.query)
+			msg = ""
+			if k, _ := t.run(e); k == "enter" {
+				msg, _ = rename(all, s.id, string(e.query))
+				mu.Lock()
+				delete(cache, s.id)
+				delete(loading, s.id)
+				mu.Unlock()
+			}
+			v.hide = e.hide
 		case "ctrl-d":
 			t.drain()
 			var ok bool

@@ -27,14 +27,15 @@ The only other requirement is the `claude` CLI, to resume sessions. Updates use 
 ## Usage
 
 ```
-claude-resume              pick a session, or list the last 10 outside a terminal
-claude-resume -a           list all sessions (--all)
-claude-resume <id>         resume a session in its folder (a unique ID prefix is enough)
-claude-resume -d <id>      delete a session after a confirmation (--delete)
-claude-resume -d -y <id>   delete without asking; needs the full session ID (--yes)
-claude-resume update       install the latest release
-claude-resume -v           show the installed version (--version)
-claude-resume -h           show help (--help)
+claude-resume                  pick a session, or list the last 10 outside a terminal
+claude-resume -a               list all sessions (--all)
+claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
+claude-resume -r <id> <title>  rename a session (--rename)
+claude-resume -d <id>          delete a session after a confirmation (--delete)
+claude-resume -d -y <id>       delete without asking; needs the full session ID (--yes)
+claude-resume update           install the latest release
+claude-resume -v               show the installed version (--version)
+claude-resume -h               show help (--help)
 ```
 
 The title is the name you gave the session with `/rename`, otherwise the title claude generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
@@ -43,8 +44,10 @@ You can:
 * Resume sessions
 * Preview sessions
 * Search sessions
+* Rename sessions
 * Delete sessions
-* TODO Rename sessions
+
+Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
 
 ## Deleting sessions
 
