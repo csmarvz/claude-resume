@@ -455,7 +455,7 @@ func pick(all []*session) {
 	dir, msg, choose := "", "", false
 	for {
 		if choose {
-			f := &view{prompt: "folder> ", items: folders(all), foot: "  ↑↓ select · ENTER show its sessions · ESC all sessions"}
+			f := &view{prompt: "folder> ", items: folders(all), foot: "↑↓ select · ENTER show its sessions · ESC all sessions"}
 			k, i := t.run(f)
 			dir = ""
 			if k == "enter" {
@@ -487,7 +487,7 @@ func pick(all []*session) {
 		if dir != "" {
 			esc = "folders"
 		}
-		v.foot = "  Type to search · ↑↓ select · ENTER resume · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
+		v.foot = "Type to search · ↑↓ select · ENTER resume · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
 		k, i := t.run(v)
 		switch k {
 		case "esc":
@@ -504,7 +504,7 @@ func pick(all []*session) {
 		case "ctrl-r":
 			s := shown[i]
 			e := &view{prompt: "rename> ", items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(s.title),
-				preview: func(int) []line { return v.preview(i) }, foot: "  Type the new title · ENTER save · ESC cancel"}
+				preview: func(int) []line { return v.preview(i) }, foot: "Type the new title · ENTER save · ESC cancel"}
 			e.cur = len(e.query)
 			msg = ""
 			if k, _ := t.run(e); k == "enter" {
