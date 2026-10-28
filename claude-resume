@@ -359,7 +359,7 @@ pick() {
     else
       opts+=(--expect ctrl-d)
       hint=${hint/ · CTRL-A folders/}
-      head=$hint${msg:+$'\n'$msg}
+      head="${hint#  }"$'\n'"fzf ${v%% *} is old: update to 0.53 or later for more features (see the README)"${msg:+$'\n'$msg}
     fi
     if [[ -n $dir ]]; then head="folder: $dir${head:+$'\n'$head}"; fi
     rc=0

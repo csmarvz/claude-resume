@@ -21,7 +21,24 @@ cd claude-resume
 ./install.sh
 ```
 
-Requirements: bash (3.2 or later, so the macOS default works), `jq`, and the `claude` CLI to resume sessions. `fzf` is optional.
+Requirements: bash (3.2 or later, so the macOS default works), `jq`, and the `claude` CLI to resume sessions. `fzf` is optional; the picker needs fzf 0.53 or later for the folder filter and its current layout, and falls back to a simpler version with older releases.
+
+## Updating
+
+Run the install command again; it replaces the installed script with the latest version:
+
+```
+curl -fsSL https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.sh | bash
+```
+
+If you installed from a clone, run `git pull` and then `./install.sh` in it. The installer copies the script, so pulling alone does not change the installed copy.
+
+### Updating fzf
+
+The installer only installs `fzf` when it is missing and never upgrades it, and distribution packages are often older than 0.53 (Ubuntu 24.04 ships 0.44). Check your version with `fzf --version`. To get a current release:
+
+- Homebrew (macOS or Linux): `brew install fzf`, or `brew upgrade fzf` if Homebrew already installed it.
+- Any system with git: `git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf && ~/.fzf/install`. The fzf installer downloads the binary and asks before it edits your shell profile.
 
 ## Usage
 

@@ -53,6 +53,13 @@ main() {
   esac
 
   command -v claude >/dev/null || say "note: the claude CLI was not found; install Claude Code to resume sessions"
+
+  local v
+  v=$(fzf --version 2>/dev/null) || v=
+  if [[ $v =~ ^0\.([0-9]+)\. ]] && (( BASH_REMATCH[1] < 53 )); then
+    say "note: fzf ${v%% *} works, but the folder filter and the newer picker layout need fzf 0.53 or later"
+    say "      to update fzf, see https://github.com/csmarvz/claude-resume#updating-fzf"
+  fi
 }
 
 main "$@"
