@@ -54,8 +54,14 @@ type record struct {
 	AiTitle          string `json:"aiTitle"`
 	IsMeta           bool   `json:"isMeta"`
 	IsCompactSummary bool   `json:"isCompactSummary"`
+	GitBranch        string `json:"gitBranch"`
 	Message          struct {
 		Content json.RawMessage `json:"content"`
+		Usage   struct {
+			Input       int `json:"input_tokens"`
+			CacheCreate int `json:"cache_creation_input_tokens"`
+			CacheRead   int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
 	} `json:"message"`
 }
 
@@ -387,7 +393,7 @@ func list(all []*session, n int) {
 }
 
 func preview(s *session) []line {
-	reply := ""
+	reply, branch, tokens := "", "", 0
 	var prompts []string
 	seen := map[string]bool{}
 	eachLine(s.path, func(int, []byte) bool { return true }, func(_ int, b []byte) bool {
@@ -397,6 +403,12 @@ func preview(s *session) []line {
 		}
 		var r record
 		json.Unmarshal(b, &r)
+		if r.GitBranch != "" {
+			branch = r.GitBranch
+		}
+		if u := r.Message.Usage; u.Input+u.CacheCreate+u.CacheRead > 0 {
+			tokens = u.Input + u.CacheCreate + u.CacheRead
+		}
 		if r.Type == "assistant" && bytes.HasPrefix(r.Message.Content, []byte("[")) {
 			if t, _ := text(r.Message.Content, "\n"); t != "" {
 				reply = t
@@ -417,7 +429,18 @@ func preview(s *session) []line {
 	if reply == "" {
 		reply = "(none)"
 	}
-	out := []line{{"1", title}, {"2", tilde(s.cwd) + "  ·  " + date(s) + "  ·  " + s.id}, {}, {"1", "Last reply"}}
+	var n int64
+	for _, p := range files(s) {
+		n += size(p)
+	}
+	meta := []string{human(n) + "B"}
+	if branch != "" && branch != "HEAD" {
+		meta = append([]string{branch}, meta...)
+	}
+	if tokens > 0 {
+		meta = append(meta, fmt.Sprintf("%dk tokens", (tokens+500)/1000))
+	}
+	out := []line{{"1", title}, {"2", tilde(s.cwd) + "  ·  " + date(s) + "  ·  " + s.id}, {"2", strings.Join(meta, "  ·  ")}, {}, {"1", "Last reply"}}
 	for _, l := range strings.Split(cut(reply, 1500), "\n") {
 		out = append(out, line{"", l})
 	}
@@ -446,6 +469,16 @@ func openPid(id string) string {
 		}
 	}
 	return ""
+}
+
+func files(s *session) []string {
+	var paths []string
+	for _, p := range []string{s.path, strings.TrimSuffix(s.path, ".jsonl"), filepath.Join(config, "file-history", s.id), filepath.Join(config, "session-env", s.id)} {
+		if _, err := os.Lstat(p); err == nil {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }
 
 func size(p string) int64 {
@@ -490,12 +523,7 @@ func remove(all []*session, prefix string, yes bool, t *tty) (string, bool) {
 	if !s.loaded {
 		s.load()
 	}
-	var paths []string
-	for _, p := range []string{s.path, strings.TrimSuffix(s.path, ".jsonl"), filepath.Join(config, "file-history", s.id), filepath.Join(config, "session-env", s.id)} {
-		if _, err := os.Lstat(p); err == nil {
-			paths = append(paths, p)
-		}
-	}
+	paths := files(s)
 	if len(paths) == 0 {
 		return "Not deleted: no files found for session " + s.id, false
 	}
