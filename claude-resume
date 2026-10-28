@@ -88,27 +88,30 @@ table() {
   done
 }
 
-columns() {
-  local date title cwd id i tw=0 cw=0
-  local dates=() titles=() cwds=() ids=()
-  while IFS=$'\t' read -r date title cwd id; do
-    [[ -z ${1:-} || $cwd == "$1" ]] || continue
-    dates+=("$date")
-    titles+=("$title")
-    cwds+=("$cwd")
-    ids+=("$id")
-    tw=$(( ${#title} > tw ? ${#title} : tw ))
-    cw=$(( ${#cwd} > cw ? ${#cwd} : cw ))
-  done
-  for i in "${!ids[@]}"; do
-    printf '%s  %s%*s  %s%*s  %s\n' "${dates[i]}" \
-      "${titles[i]}" $((tw - ${#titles[i]})) '' \
-      "${cwds[i]}" $((cw - ${#cwds[i]})) '' \
-      "${ids[i]}"
+width() {
+  local f d n h=${HOME//[^a-zA-Z0-9]/-}
+  cw=0
+  for f in "${sorted[@]:0:$1}"; do
+    d=${f#./}
+    d=${d%%/*}
+    n=${#d}
+    if [[ $d == "$h" || $d == "$h"-* ]]; then n=$(( n - ${#h} + 1 )); fi
+    if (( n > cw )); then cw=$n; fi
   done
 }
 
-list() { table "$1" | columns; }
+columns() {
+  local date title cwd id
+  while IFS=$'\t' read -r date title cwd id; do
+    [[ -z ${1:-} || $cwd == "$1" ]] || continue
+    printf '%s  %s%*s  %s%*s  %s\n' "$date" \
+      "$title" $(( ${#title} < 50 ? 50 - ${#title} : 0 )) '' \
+      "$cwd" $(( ${#cwd} < cw ? cw - ${#cwd} : 0 )) '' \
+      "$id"
+  done
+}
+
+list() { width "$1"; table "$1" | columns; }
 
 preview() {
   local f cwd title id
@@ -215,7 +218,8 @@ confirm() {
   stty -icanon -echo min 0 time 0 </dev/tty
   cat </dev/tty >/dev/null
   stty "$old" </dev/tty
-  printf '\033[?1049h\033[?25l' >/dev/tty
+  if [[ -z ${alt:-} ]]; then printf '\033[?1049h' >/dev/tty; fi
+  printf '\033[?25l' >/dev/tty
   trap 'printf "\033[?25h\033[?1049l" >/dev/tty; stty "$old" </dev/tty' EXIT
   trap 'intr=1' INT
   trap 'exit 143' TERM
@@ -250,8 +254,10 @@ confirm() {
       q) sel=0; break ;;
     esac
   done
-  printf '\033[?25h\033[?1049l' >/dev/tty
-  trap - EXIT INT TERM WINCH
+  printf '\033[?25h' >/dev/tty
+  if [[ -z ${alt:-} ]]; then printf '\033[?1049l' >/dev/tty; fi
+  trap - INT TERM WINCH
+  trap "${alt:--}" EXIT
   (( sel == 1 ))
 }
 
@@ -320,19 +326,24 @@ footer() {
 }
 
 pick() {
-  local msg= query= pos=0 ver=0 hide= dir= pick= foot=() v all rows out rc key id rest opts head hint top=()
+  local msg= query= pos=0 ver=0 hide= dir= pick= foot=() all= tmp alt v rows out rc key id rest opts head hint top=()
   v=$(fzf --version 2>/dev/null) || v=
   if [[ $v =~ ^([0-9]+)\.([0-9]+) ]]; then ver=$(( BASH_REMATCH[1] * 1000 + BASH_REMATCH[2] )); fi
+  tmp=$(mktemp)
+  alt="printf '\\033[?1049l' >/dev/tty; rm -f $(printf '%q' "$tmp")"
+  trap "$alt" EXIT
+  width "${#sorted[@]}"
   while :; do
-    all=$(table "${#sorted[@]}")
     if [[ -n $pick ]]; then
       footer '  ↑↓ select · ENTER show its sessions · ESC all sessions'
-      dir=$(cut -f3 <<<"$all" | awk '!seen[$0]++' | SHELL=$BASH fzf --no-sort --no-multi --layout=reverse \
+      dir=$(cut -f3 <<<"$all" | awk '!seen[$0]++' | SHELL=$BASH fzf --no-clear --no-sort --no-multi --layout=reverse \
         --prompt='folder> ' "${foot[@]}") || dir=
-      pick= pos=0
+      pick= pos=0 msg=
     fi
-    rows=$(columns "$dir" <<<"$all")
-    if [[ -z $rows ]]; then dir=; rows=$(columns <<<"$all"); fi
+    if [[ -n $all ]]; then
+      rows=$(columns "$dir" <<<"$all")
+      if [[ -z $rows ]]; then dir=; rows=$(columns <<<"$all"); fi
+    fi
     hint="  Type to search · ↑↓ select · ENTER resume · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC quit"
     if [[ -n $dir ]]; then hint=${hint% quit}" folders"; fi
     opts=()
@@ -352,12 +363,19 @@ pick() {
     fi
     if [[ -n $dir ]]; then head="folder: $dir${head:+$'\n'$head}"; fi
     rc=0
-    out=$(printf '%s\n' "$rows" | SHELL=$BASH fzf --no-sort --no-multi --layout=reverse --prompt='search> ' \
+    out=$(set +o pipefail
+      if [[ -n $all ]]; then printf '%s\n' "$rows"; else table "${#sorted[@]}" | tee "$tmp" | columns; fi |
+      SHELL=$BASH fzf --no-clear --no-sort --no-multi --layout=reverse --prompt='search> ' \
       --print-query --query "$query" ${opts[@]+"${opts[@]}"} \
       --bind $'up:up+change-prompt(\e[2msearch> \e[0m),down:down+change-prompt(\e[2msearch> \e[0m)' \
       --bind 'change:change-prompt(search> ),ctrl-space:toggle-preview' ${top[@]+"${top[@]}"} \
       --header "$head" \
       --preview "$(printf '%q' "$self") --preview {-1}" --preview-window "down,60%,wrap$hide") || rc=$?
+    if [[ -z $all ]]; then
+      all=$(<"$tmp")
+      if (( $(grep -c '' <<<"$all") < ${#sorted[@]} )); then all=$(table "${#sorted[@]}"); fi
+      rows=$(columns <<<"$all")
+    fi
     case $rc in
       0) ;;
       1) query=${out%%$'\n'*}; pos=0; continue ;;
@@ -377,11 +395,13 @@ pick() {
     rest=${rest%$'\n'*}
     query=${rest##*$'\n'}
     if [[ $key != ctrl-d* ]]; then
+      printf '\033[?1049l' >/dev/tty
+      trap - EXIT
       resume "$id"
     else
       hide=${key#ctrl-d}; hide=${hide:+,hidden}
       pos=$(printf '%s\n' "$rows" | FZF_DEFAULT_OPTS= fzf --no-sort --filter "$query" | grep -n -F "$id" | head -n 1 | cut -d: -f1) || pos=0
-      delete "$id" || true
+      if delete "$id"; then all=$(grep -v -F "$id" <<<"$all" || true); fi
       scan
       (( ${#sorted[@]} )) || { echo "$msg"; exit 0; }
     fi
