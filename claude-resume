@@ -78,18 +78,25 @@ session() {
   echo "${matches[0]}"
 }
 
-list() {
-  local f id cwd title i tw=0 cw=0
-  local dates=() titles=() cwds=() ids=()
+table() {
+  local f id cwd title
   for f in "${sorted[@]:0:$1}"; do
     IFS=$'\t' read -r cwd title < <(info "$f")
-    title=${title:0:50}
     if [[ $cwd == "$HOME" || $cwd == "$HOME"/* ]]; then cwd="~${cwd#"$HOME"}"; fi
     id=${f##*/}
-    dates+=("$(date -r "$f" '+%Y-%m-%d %H:%M')")
+    printf '%s\t%s\t%s\t%s\n' "$(date -r "$f" '+%Y-%m-%d %H:%M')" "${title:0:50}" "$cwd" "${id%.jsonl}"
+  done
+}
+
+columns() {
+  local date title cwd id i tw=0 cw=0
+  local dates=() titles=() cwds=() ids=()
+  while IFS=$'\t' read -r date title cwd id; do
+    [[ -z ${1:-} || $cwd == "$1" ]] || continue
+    dates+=("$date")
     titles+=("$title")
     cwds+=("$cwd")
-    ids+=("${id%.jsonl}")
+    ids+=("$id")
     tw=$(( ${#title} > tw ? ${#title} : tw ))
     cw=$(( ${#cwd} > cw ? ${#cwd} : cw ))
   done
@@ -100,6 +107,8 @@ list() {
       "${ids[i]}"
   done
 }
+
+list() { table "$1" | columns; }
 
 preview() {
   local f cwd title id
@@ -305,26 +314,43 @@ resume() {
   exec claude --resume "${f%.jsonl}"
 }
 
+footer() {
+  foot=(--border=bottom --border-label-pos=1:bottom
+    --bind "start,resize:transform-border-label:printf '%s%*s' '$1' \$((FZF_COLUMNS > ${#1} ? FZF_COLUMNS - ${#1} : 0)) ''")
+}
+
 pick() {
-  local msg= query= pos=0 ver=0 hide= v rows out rc key id rest opts head top=()
-  local hint='  Type to search · ↑↓ select · ENTER resume session · CTRL-D delete · CTRL-SPACE preview · ESC quit'
+  local msg= query= pos=0 ver=0 hide= dir= pick= foot=() v all rows out rc key id rest opts head hint top=()
   v=$(fzf --version 2>/dev/null) || v=
   if [[ $v =~ ^([0-9]+)\.([0-9]+) ]]; then ver=$(( BASH_REMATCH[1] * 1000 + BASH_REMATCH[2] )); fi
   while :; do
-    rows=$(list "${#sorted[@]}")
+    all=$(table "${#sorted[@]}")
+    if [[ -n $pick ]]; then
+      footer '  ↑↓ select · ENTER show its sessions · ESC all sessions'
+      dir=$(cut -f3 <<<"$all" | awk '!seen[$0]++' | SHELL=$BASH fzf --no-sort --no-multi --layout=reverse \
+        --prompt='folder> ' "${foot[@]}") || dir=
+      pick= pos=0
+    fi
+    rows=$(columns "$dir" <<<"$all")
+    if [[ -z $rows ]]; then dir=; rows=$(columns <<<"$all"); fi
+    hint="  Type to search · ↑↓ select · ENTER resume · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC quit"
+    if [[ -n $dir ]]; then hint=${hint% quit}" folders"; fi
     opts=()
     if (( ver >= 38 && pos > 1 )); then opts=(--bind "load:pos($pos)"); fi
     if (( ver >= 53 )); then
       opts+=(--bind 'enter:print()+accept'
-        --bind 'ctrl-d:transform:[ -n "$FZF_PREVIEW_LINES" ] && echo "print(ctrl-d)+accept" || echo "print(ctrl-d-hidden)+accept"'
-        --border=bottom --border-label-pos=1:bottom
-        --bind "start,resize:transform-border-label:printf '%s%*s' '$hint' \$((FZF_COLUMNS > ${#hint} ? FZF_COLUMNS - ${#hint} : 0)) ''")
+        --bind 'ctrl-a:become(printf "%s\n" "$FZF_QUERY"; [ -n "$FZF_PREVIEW_LINES" ] && echo ctrl-a || echo ctrl-a-hidden)'
+        --bind 'ctrl-d:transform:[ -n "$FZF_PREVIEW_LINES" ] && echo "print(ctrl-d)+accept" || echo "print(ctrl-d-hidden)+accept"')
+      footer "$hint"
+      opts+=("${foot[@]}")
       top=(--bind $'up:transform:(( FZF_POS > 1 )) && echo \'up+change-prompt(\e[2msearch> \e[0m)\' || echo \'change-prompt(search> )\'')
       head=$msg
     else
       opts+=(--expect ctrl-d)
+      hint=${hint/ · CTRL-A folders/}
       head=$hint${msg:+$'\n'$msg}
     fi
+    if [[ -n $dir ]]; then head="folder: $dir${head:+$'\n'$head}"; fi
     rc=0
     out=$(printf '%s\n' "$rows" | SHELL=$BASH fzf --no-sort --no-multi --layout=reverse --prompt='search> ' \
       --print-query --query "$query" ${opts[@]+"${opts[@]}"} \
@@ -335,10 +361,16 @@ pick() {
     case $rc in
       0) ;;
       1) query=${out%%$'\n'*}; pos=0; continue ;;
-      130) exit 0 ;;
+      130) if [[ -z $dir ]]; then exit 0; fi; pick=yes; continue ;;
       *) die "fzf exited with status $rc" ;;
     esac
     id=${out##*$'\n'}
+    if [[ $id == ctrl-a* ]]; then
+      query=${out%$'\n'*}
+      hide=${id#ctrl-a}; hide=${hide:+,hidden}
+      pick=yes
+      continue
+    fi
     id=${id##* }
     rest=${out%$'\n'*}
     key=${rest##*$'\n'}
