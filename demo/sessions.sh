@@ -5,7 +5,7 @@ out=${1:?usage: sessions.sh <dir>}/projects
 home=/home/demo
 
 session() {
-  local cwd=$1 title=$2 age=$3 reply=$4 dir h id f p
+  local cwd=$1 title=$2 age=$3 reply=$4 dir h id f p parent=null uuid text n=0
   shift 4
   h=$(printf '%s' "$title" | md5sum)
   id=${h:0:8}-${h:8:4}-4${h:13:3}-a${h:17:3}-${h:20:12}
@@ -14,11 +14,22 @@ session() {
   mkdir -p "$dir"
   : >"$f"
   for p in "$@"; do
-    jq -nc --arg cwd "$cwd" --arg p "$p" '{type: "user", cwd: $cwd, message: {role: "user", content: $p}}' >>"$f"
-    jq -nc '{type: "assistant", message: {content: [{type: "text", text: "On it."}]}}' >>"$f"
+    n=$((n + 1))
+    text="On it."
+    [ $n = $# ] && text=$reply
+    uuid=$(cat /proc/sys/kernel/random/uuid)
+    jq -nc --arg cwd "$cwd" --arg id "$id" --arg u "$uuid" --argjson parent "$parent" --arg t "$age" --arg p "$p" \
+      '{type: "user", parentUuid: $parent, uuid: $u, sessionId: $id, timestamp: ($t | sub(" "; "T") + ":00.000Z"), cwd: $cwd, gitBranch: "main", isSidechain: false, userType: "external", version: "2.1.312",
+        message: {role: "user", content: $p}}' >>"$f"
+    parent=\"$uuid\"
+    uuid=$(cat /proc/sys/kernel/random/uuid)
+    jq -nc --arg cwd "$cwd" --arg id "$id" --arg u "$uuid" --argjson parent "$parent" --arg t "$age" --arg r "$text" \
+      '{type: "assistant", parentUuid: $parent, uuid: $u, sessionId: $id, timestamp: ($t | sub(" "; "T") + ":30.000Z"), cwd: $cwd, gitBranch: "main", isSidechain: false, userType: "external", version: "2.1.312",
+        message: {id: ("msg_" + $u), type: "message", role: "assistant", model: "claude-opus-5-5", content: [{type: "text", text: $r}], stop_reason: "end_turn", stop_sequence: null,
+          usage: {input_tokens: ($r | length * 97), output_tokens: 120}}}' >>"$f"
+    parent=\"$uuid\"
   done
-  jq -nc --arg r "$reply" '{type: "assistant", message: {content: [{type: "text", text: $r}]}}' >>"$f"
-  jq -nc --arg t "$title" '{type: "ai-title", aiTitle: $t}' >>"$f"
+  jq -nc --arg t "$title" --arg id "$id" '{type: "ai-title", aiTitle: $t, sessionId: $id}' >>"$f"
   touch -d "$age" "$f"
 }
 
@@ -60,3 +71,5 @@ session "$home/dev/blog" "Dark mode toggle" "2026-10-18 19:05" \
 session "$home/notes" "Weekly report draft" "2026-10-17 08:40" \
   "Draft is in weekly/2026-42.md: three shipped items, one blocked on the payment provider, and next week's focus." \
   "draft my weekly report from this week's commits"
+
+jq -n --arg h "$home" '{hasCompletedOnboarding: true, theme: "dark", projects: ([$h + "/dev/shop", $h + "/dev/shop/backend", $h + "/dev/shop/frontend", $h + "/dev/blog", $h + "/dev/api-gateway", $h + "/dotfiles", $h + "/notes"] | map({key: ., value: {hasTrustDialogAccepted: true}}) | from_entries)}' >"${1}/.claude.json"

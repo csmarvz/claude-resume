@@ -22,6 +22,8 @@ irm https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.ps1 | i
 
 `claude-resume` is a single program with no dependencies. The installers download the build for your system from the latest GitHub release: on macOS and Linux into `~/.local/bin` (set `PREFIX` to install into `$PREFIX/bin` instead), on Windows into `%LOCALAPPDATA%\Programs\claude-resume`, which they add to your PATH. You can also download a binary from the [releases page](https://github.com/csmarvz/claude-resume/releases) yourself, or build it with Go 1.26 or later: `go install github.com/csmarvz/claude-resume@latest`.
 
+Only the Linux build has been tested so far. The macOS and Windows builds are released with each version, but nobody has run them on a real machine yet. If you try one, please [open an issue](https://github.com/csmarvz/claude-resume/issues) to say whether it works.
+
 The only other requirement is the `claude` CLI, to resume sessions. Updates use the system `curl`, which ships with macOS, Windows 10 and later, and most Linux distributions.
 
 ## Usage
@@ -61,7 +63,7 @@ Claude Code also deletes old transcripts on its own: by default, sessions untouc
 
 Run `claude-resume update`. It downloads the latest release for your system, checks it against the release's SHA-256 checksums and replaces itself; if anything fails, the installed version stays as it was.
 
-Once a day, the picker asks GitHub in the background whether a newer release is out, and shows a line at the top when there is one. Set `CLAUDE_RESUME_NO_UPDATE_CHECK=1` to turn that check off.
+Once a day, the picker asks GitHub in the background whether a newer release is out, and shows it in yellow at the bottom right when there is one. Set `CLAUDE_RESUME_NO_UPDATE_CHECK=1` to turn that check off.
 
 Version 0.0.1-alpha has no `update` command: to leave it, run the install command once more.
 
