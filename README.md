@@ -24,7 +24,7 @@ irm https://raw.githubusercontent.com/csmarvz/claude-resume/main/install.ps1 | i
 
 Only the Linux build has been tested so far. The macOS and Windows builds are released with each version, but nobody has run them on a real machine yet. If you try one, please [open an issue](https://github.com/csmarvz/claude-resume/issues) to say whether it works.
 
-The only other requirement is the `claude` CLI, to resume sessions. Updates use the system `curl`, which ships with macOS, Windows 10 and later, and most Linux distributions.
+The only other requirement is the `claude` CLI, to resume sessions. Updates use the system `curl`.
 
 ## Usage
 
@@ -66,14 +66,6 @@ Run `claude-resume update`. It downloads the latest release for your system, che
 Once a day, the picker asks GitHub in the background whether a newer release is out, and shows it in yellow at the bottom right when there is one. Set `CLAUDE_RESUME_NO_UPDATE_CHECK=1` to turn that check off.
 
 Version 0.0.1-alpha has no `update` command: to leave it, run the install command once more.
-
-### Upgrading from the bash version
-
-The first versions were a bash script that needed `jq` and `fzf`. To switch to the new program:
-
-1. Run the install command above again. If you installed with a custom `PREFIX`, set the same one. The new program replaces the script at the same path, even when that path is a symlink into a clone of this repository, so aliases such as `cr` keep working.
-2. Check that it worked: `claude-resume -h` should no longer mention fzf.
-3. Optionally remove `jq` and `fzf` if nothing else uses them, for example with `sudo apt remove jq fzf` or `brew uninstall jq fzf`.
 
 ## Uninstall
 
