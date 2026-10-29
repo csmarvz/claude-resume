@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `claude-resume update` shows each step: the installed version, the release it found, a progress line while downloading, the checksum check and the install. When something fails, it says what went wrong in plain words (no connection, a stalled or broken download, a damaged file, no permission to write) and confirms that nothing was changed.
+
 ## [0.0.8-alpha] - 2026-10-29
 
 ### Added

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 const repo = "https://github.com/csmarvz/claude-resume"
@@ -26,11 +31,44 @@ func currentVersion() string {
 }
 
 func curl(args ...string) ([]byte, error) {
-	out, err := exec.Command("curl", append([]string{"-fsS", "--connect-timeout", "10"}, args...)...).Output()
-	if e, ok := err.(*exec.ExitError); ok && len(e.Stderr) > 0 {
-		err = fmt.Errorf("%s", strings.TrimSpace(string(e.Stderr)))
+	var out, stderr bytes.Buffer
+	cmd := exec.Command("curl", append([]string{"-fsS", "--connect-timeout", "10"}, args...)...)
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	err := cmd.Run()
+	return out.Bytes(), explain(err, stderr.String())
+}
+
+func explain(err error, stderr string) error {
+	var e *exec.ExitError
+	if errors.Is(err, exec.ErrNotFound) {
+		return errors.New("curl is needed for updates but isn't installed")
 	}
-	return out, err
+	if !errors.As(err, &e) {
+		return err
+	}
+	switch e.ExitCode() {
+	case 5, 6:
+		return errors.New("can't find github.com; check your internet connection")
+	case 7:
+		return errors.New("can't connect to github.com; check your internet connection, proxy or firewall")
+	case 28:
+		return errors.New("the connection is too slow or stopped answering")
+	case 18, 52, 55, 56:
+		return errors.New("the connection broke before the download finished")
+	case 35, 51, 58, 60, 77:
+		return errors.New("the secure connection to github.com failed; check your system clock and any proxy")
+	case 22:
+		if i := strings.LastIndex(stderr, "error: "); i >= 0 {
+			return fmt.Errorf("GitHub answered with error %s", strings.TrimSpace(stderr[i+7:]))
+		}
+		return errors.New("GitHub answered with an error")
+	case 23:
+		return errors.New("the download could not be written to disk")
+	}
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		return errors.New(strings.TrimPrefix(msg, "curl: "))
+	}
+	return err
 }
 
 func label() string {
@@ -94,16 +132,35 @@ func notice() string {
 }
 
 func update() {
+	from, open, tmp := currentVersion(), false, ""
+	home, _ = os.UserHomeDir()
+	step := func(text string) { fmt.Print(text + "... "); open = true }
+	end := func(text string) { fmt.Println(text); open = false }
+	fail := func(format string, a ...any) {
+		if open {
+			fmt.Println()
+		}
+		if tmp != "" {
+			os.Remove(tmp)
+		}
+		fmt.Fprintf(os.Stderr, "Update failed: "+format+"\nNothing was changed; claude-resume %s is still installed.\n", append(a, from)...)
+		os.Exit(1)
+	}
+
+	fmt.Printf("claude-resume %s is installed.\n", from)
+	step("Checking for a newer release")
 	tag, err := latest()
 	if err != nil {
-		die("could not check for updates: %v", err)
+		fail("%v.", err)
 	}
 	remember(tag)
 	v := strings.TrimPrefix(tag, "v")
-	if !newer(v, currentVersion()) {
-		fmt.Printf("claude-resume %s is up to date\n", currentVersion())
+	if !newer(v, from) {
+		end("none, " + from + " is the latest.")
 		return
 	}
+	end("found " + v + ".")
+
 	name := "claude-resume-" + runtime.GOOS + "-" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -111,7 +168,7 @@ func update() {
 	base := repo + "/releases/download/" + tag + "/"
 	sums, err := get(base + "checksums.txt")
 	if err != nil {
-		die("could not download the checksums of %s: %v", tag, err)
+		fail("could not download the checksums of %s: %v.", v, err)
 	}
 	want := ""
 	for _, l := range strings.Split(string(sums), "\n") {
@@ -120,31 +177,126 @@ func update() {
 		}
 	}
 	if want == "" {
-		die("release %s has no build for %s", tag, name)
+		fail("release %s has no build for this system (%s).", v, name)
 	}
-	bin, err := get(base + name)
-	if err != nil {
-		die("download failed: %v", err)
-	}
-	if sum := sha256.Sum256(bin); hex.EncodeToString(sum[:]) != want {
-		die("the download of %s does not match its checksum; nothing was changed", name)
-	}
+
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		die("cannot find the installed program: %v", err)
+		fail("cannot find the installed program: %v.", err)
 	}
-	tmp := exe + ".new"
-	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
-		die("cannot write next to %s: %v", exe, err)
+	f, err := os.Create(exe + ".new")
+	if errors.Is(err, os.ErrPermission) {
+		fail("no permission to write to %s. Run the update as the user who installed claude-resume, or install it again with the install command.", filepath.Dir(exe))
+	}
+	if err != nil {
+		fail("cannot write next to %s: %v.", exe, err)
+	}
+	f.Close()
+	tmp = exe + ".new"
+
+	if err := download(base+name, tmp, name); err != nil {
+		fail("%v. Try again later.", err)
+	}
+
+	step("Checking the download against the release checksum")
+	h := sha256.New()
+	if f, err = os.Open(tmp); err == nil {
+		_, err = io.Copy(h, f)
+		f.Close()
+	}
+	if err != nil {
+		fail("cannot read the download: %v.", err)
+	}
+	if hex.EncodeToString(h.Sum(nil)) != want {
+		fail("the download is damaged: its checksum doesn't match the release. Try again.")
+	}
+	end("ok.")
+
+	step("Installing into " + tilde(filepath.Dir(exe)))
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		fail("cannot make the download executable: %v.", err)
 	}
 	if err := replace(tmp, exe); err != nil {
-		os.Remove(tmp)
-		die("cannot replace %s: %v", exe, err)
+		if runtime.GOOS == "windows" {
+			fail("cannot replace %s: %v. Close other windows running claude-resume and try again.", exe, err)
+		}
+		fail("cannot replace %s: %v.", exe, err)
 	}
-	fmt.Printf("updated claude-resume %s to %s\n", currentVersion(), v)
+	end("done.")
+	fmt.Printf("Updated claude-resume %s to %s.\n", from, v)
+}
+
+func amount(n int64) string {
+	h := human(n)
+	if u := h[len(h)-1]; u >= 'A' && u <= 'Z' {
+		return h[:len(h)-1] + " " + string(u) + "B"
+	}
+	return h + " bytes"
+}
+
+// download runs curl into dest and redraws a progress line while it runs.
+func download(url, dest, name string) error {
+	total := int64(0)
+	if out, err := curl("-sIL", "--max-time", "15", url); err == nil {
+		for _, l := range strings.Split(string(out), "\n") {
+			if k, val, ok := strings.Cut(l, ":"); ok && strings.EqualFold(k, "content-length") {
+				total, _ = strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+			}
+		}
+	}
+	var stderr bytes.Buffer
+	cmd := exec.Command("curl", "-fsSL", "--connect-timeout", "10", "--speed-limit", "1024", "--speed-time", "30", "-o", dest, url)
+	cmd.Stderr = &stderr
+	tty := term.IsTerminal(int(os.Stdout.Fd()))
+	show := func(final bool) {
+		n := int64(0)
+		if st, err := os.Stat(dest); err == nil {
+			n = st.Size()
+		}
+		line := fmt.Sprintf("Downloading %s... %s", name, amount(n))
+		if total > 0 {
+			line = fmt.Sprintf("Downloading %s... %s of %s, %d%%", name, amount(n), amount(total), n*100/total)
+		}
+		if final {
+			line = fmt.Sprintf("Downloading %s... %s, done.", name, amount(n))
+		}
+		fmt.Printf("\r\x1b[K%s", line)
+	}
+	if !tty {
+		fmt.Printf("Downloading %s... ", name)
+		show = func(final bool) {
+			if final {
+				fmt.Print("done.")
+			}
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		return explain(err, "")
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				fmt.Println()
+				if e := (*exec.ExitError)(nil); errors.As(err, &e) && e.ExitCode() == 28 {
+					return errors.New("the download stalled: under 1 KB/s for 30 seconds")
+				}
+				return explain(err, stderr.String())
+			}
+			show(true)
+			fmt.Println()
+			return nil
+		case <-tick.C:
+			show(false)
+		}
+	}
 }
 
 // newer reports whether version a is later than b, comparing major.minor.patch
