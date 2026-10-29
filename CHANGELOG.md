@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Pinning (#7): `/pin` or CTRL-T keeps a session at the top of the list, marked with ★ and shown in bold. claude-resume keeps hard links to a pinned session's files in `~/.claude-resume/pinned`, so if Claude Code's cleanup deletes the session, the next run of claude-resume puts it back. `/unpin` undoes it, and `claude-resume --pin <id>` and `--unpin <id>` do the same from the command line.
+- `/exit` quits the picker.
+
 ## [0.0.7-alpha] - 2026-10-29
 
 ### Added

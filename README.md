@@ -37,6 +37,8 @@ claude-resume -d <id>          move a session to the trash after a confirmation 
 claude-resume -d -y <id>       move it without asking; needs the full session ID (--yes)
 claude-resume --archive <id>   archive a session so that it never expires
 claude-resume --restore <id>   move an archived or deleted session back to the session list
+claude-resume --pin <id>       keep a session at the top of the list and safe from Claude Code's cleanup
+claude-resume --unpin <id>     unpin a session
 claude-resume update           install the latest release
 claude-resume -v               show the installed version (--version)
 claude-resume -h               show help (--help)
@@ -49,12 +51,17 @@ You can:
 * Preview sessions
 * Search sessions
 * Rename sessions
+* Pin sessions
 * Archive sessions
 * Delete sessions
 
-In the picker, type `/` to open the commands for the selected session: `/archive`, `/rename`, `/delete`, `/folders`, `/list-archives` and `/list-deleted`. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
+In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/delete`, `/folders`, `/list-archives`, `/list-deleted` and `/exit`. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
 
 Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
+
+## Pinning sessions
+
+`/pin` (CTRL-T) keeps a session at the top of the list, marked with ★ and shown in bold, and protects it from Claude Code's cleanup while it stays in the session list. If Claude Code deletes a pinned session anyway, because claude-resume didn't run for 30 days, claude-resume puts it back the next time it runs. The [FAQ](FAQ.md#how-does-pinning-protect-a-session) explains how. `/unpin` makes it an ordinary session again; a session last used more than 30 days ago is dated today, so Claude Code doesn't delete it at its next cleanup.
 
 ## Archiving sessions
 
@@ -70,7 +77,7 @@ Deleted sessions stay in the trash for 30 days; claude-resume deletes older ones
 
 `-y` skips the dialog and works without a terminal, so you can script it. It only accepts a full session ID, never a prefix.
 
-Claude Code also deletes old transcripts on its own: by default, sessions untouched for 30 days (the `cleanupPeriodDays` setting). Archive a session to keep it.
+Claude Code also deletes old transcripts on its own: by default, sessions untouched for 30 days (the `cleanupPeriodDays` setting). Pin or archive a session to keep it.
 
 ## Updating
 
@@ -87,6 +94,10 @@ rm "${PREFIX:-$HOME/.local}/bin/claude-resume"
 ```
 
 On Windows, delete the `%LOCALAPPDATA%\Programs\claude-resume` folder and remove it from your PATH.
+
+## How it works
+
+The [FAQ](FAQ.md) explains where sessions are stored, what each command moves or deletes, and how Claude Code's own cleanup works.
 
 ## Caveat
 

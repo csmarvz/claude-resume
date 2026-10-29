@@ -115,3 +115,70 @@ func TestPurge(t *testing.T) {
 		t.Fatal(n, err)
 	}
 }
+
+func TestPin(t *testing.T) {
+	config, pinned = t.TempDir(), t.TempDir()
+	id := "02c5f13e-4af1-44da-a134-90f6fafa5d25"
+	live := parts(config, "p", id)
+	write := func(p, text string) {
+		os.MkdirAll(filepath.Dir(p), 0o700)
+		os.WriteFile(p, []byte(text), 0o600)
+	}
+	write(live[0], "one\n")
+	write(filepath.Join(live[1], "subagents", "a.jsonl"), "sub")
+	write(filepath.Join(live[2], "f"), "backup")
+	write(filepath.Join(live[3], "e"), "env")
+	old := time.Now().AddDate(0, 0, -40)
+	os.Chtimes(live[0], old, old)
+	s := &session{path: live[0], id: id}
+	if msg, ok := pin(s); !ok || !s.pinned {
+		t.Fatal(msg)
+	}
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+
+	f, _ := os.OpenFile(live[0], os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("two\n")
+	f.Close()
+	if got := read(parts(pinned, "p", id)[0]); got != "one\ntwo\n" {
+		t.Fatalf("pinned name does not see appends: %q", got)
+	}
+
+	for _, p := range live {
+		os.RemoveAll(p)
+	}
+	if !keep(scan(filepath.Join(config, "projects"))) {
+		t.Fatal("keep restored nothing")
+	}
+	if read(live[0]) != "one\ntwo\n" || read(filepath.Join(live[1], "subagents", "a.jsonl")) != "sub" || read(filepath.Join(live[2], "f")) != "backup" || read(filepath.Join(live[3], "e")) != "env" {
+		t.Fatal("restore lost files")
+	}
+	if st, _ := os.Stat(live[0]); time.Since(st.ModTime()) > time.Minute {
+		t.Fatal("restored transcript keeps its old date")
+	}
+
+	write(live[0]+".tmp", "compacted\n")
+	os.Rename(live[0]+".tmp", live[0])
+	all := scan(filepath.Join(config, "projects"))
+	keep(all)
+	if read(parts(pinned, "p", id)[0]) != "compacted\n" || !all[0].pinned {
+		t.Fatal("pinned name not renewed after a rewrite")
+	}
+
+	moved := parts(config, "q", id)
+	os.MkdirAll(filepath.Dir(moved[0]), 0o700)
+	os.Rename(live[0], moved[0])
+	os.Rename(live[1], moved[1])
+	keep(scan(filepath.Join(config, "projects")))
+	if _, err := os.Stat(live[0]); err == nil || read(parts(pinned, "q", id)[0]) != "compacted\n" {
+		t.Fatal("relocated session restored into its old folder or not followed")
+	}
+
+	os.Chtimes(moved[0], old, old)
+	unpin(&session{path: moved[0], id: id, mod: old})
+	if files(&session{path: parts(pinned, "q", id)[0], id: id}) != nil || read(moved[0]) != "compacted\n" {
+		t.Fatal("unpin left pinned names or changed the session")
+	}
+	if st, _ := os.Stat(moved[0]); time.Since(st.ModTime()) > time.Minute {
+		t.Fatal("unpinning an old session keeps its old date")
+	}
+}

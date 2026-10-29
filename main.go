@@ -28,6 +28,8 @@ const usageText = `usage: claude-resume                  pick a session, or list
        claude-resume -d [-y] <id>     move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
        claude-resume --archive <id>   archive a session so that it never expires
        claude-resume --restore <id>   move an archived or deleted session back to the session list
+       claude-resume --pin <id>       keep a session at the top of the list and safe from Claude Code's cleanup
+       claude-resume --unpin <id>     unpin a session
        claude-resume update           install the latest release
        claude-resume -v               show the installed version (--version)
 `
@@ -38,6 +40,7 @@ var (
 	projects string
 	archived string
 	trash    string
+	pinned   string
 	cleanup  = func() {}
 
 	customMark     = []byte(`"type":"custom-title"`)
@@ -52,6 +55,7 @@ type session struct {
 	mod        time.Time
 	cwd, title string
 	loaded     bool
+	pinned     bool
 }
 
 type record struct {
@@ -158,7 +162,7 @@ func main() {
 		if !isHex(target) || strings.TrimSpace(title) == "" {
 			usage(1)
 		}
-	case arg == "--archive" || arg == "--restore":
+	case arg == "--archive" || arg == "--restore" || arg == "--pin" || arg == "--unpin":
 		if target = args[1]; len(args) != 3 || !isHex(target) {
 			usage(1)
 		}
@@ -182,8 +186,14 @@ func main() {
 	projects = filepath.Join(config, "projects")
 	archived = filepath.Join(home, ".claude-resume", "archive")
 	trash = filepath.Join(home, ".claude-resume", "trash")
+	pinned = filepath.Join(home, ".claude-resume", "pinned")
 	purge(scan(filepath.Join(trash, "projects")), time.Now().AddDate(0, 0, -30))
 	all := scan(projects)
+	if keep(all) {
+		all = scan(projects)
+		keep(all)
+	}
+	order(all)
 	if len(all) == 0 && arg != "--restore" && (arg != "" || len(scan(filepath.Join(archived, "projects"))) == 0) {
 		die("no sessions found in %s", projects)
 	}
@@ -211,6 +221,17 @@ func main() {
 		fmt.Println(msg)
 	case "--archive":
 		msg, ok := archive(all, mustFind(all, target))
+		if !ok {
+			die("%s", msg)
+		}
+		fmt.Println(msg)
+	case "--pin", "--unpin":
+		s, msg, ok := mustFind(all, target), "", true
+		if arg == "--pin" {
+			msg, ok = pin(s)
+		} else {
+			msg = unpin(s)
+		}
 		if !ok {
 			die("%s", msg)
 		}
@@ -481,15 +502,21 @@ func width(s string) int {
 }
 
 func rows(list []*session) []string {
-	tw, cw := 0, 0
+	tw, cw, mark := 0, 0, slices.ContainsFunc(list, func(s *session) bool { return s.pinned })
 	for _, s := range list {
 		tw = max(tw, width(cut(s.title, 50)))
 		cw = max(cw, width(tilde(s.cwd)))
 	}
 	out := make([]string, len(list))
 	for i, s := range list {
-		t, c := cut(s.title, 50), tilde(s.cwd)
-		out[i] = fmt.Sprintf("%s  %s%*s  %s%*s  %s", date(s), t, tw-width(t), "", c, cw-width(c), "", s.id)
+		t, c, p := cut(s.title, 50), tilde(s.cwd), ""
+		if mark {
+			p = "  "
+		}
+		if s.pinned {
+			p = "★ "
+		}
+		out[i] = fmt.Sprintf("%s%s  %s%*s  %s%*s  %s", p, date(s), t, tw-width(t), "", c, cw-width(c), "", s.id)
 	}
 	return out
 }
@@ -585,9 +612,15 @@ func openPid(id string) string {
 
 func root(s *session) string { return filepath.Dir(filepath.Dir(filepath.Dir(s.path))) }
 
+func folder(s *session) string { return filepath.Base(filepath.Dir(s.path)) }
+
+func parts(root, folder, id string) []string {
+	return []string{filepath.Join(root, "projects", folder, id+".jsonl"), filepath.Join(root, "projects", folder, id), filepath.Join(root, "file-history", id), filepath.Join(root, "session-env", id)}
+}
+
 func files(s *session) []string {
 	var paths []string
-	for _, p := range []string{s.path, strings.TrimSuffix(s.path, ".jsonl"), filepath.Join(root(s), "file-history", s.id), filepath.Join(root(s), "session-env", s.id)} {
+	for _, p := range parts(root(s), folder(s), s.id) {
 		if _, err := os.Lstat(p); err == nil {
 			paths = append(paths, p)
 		}
@@ -683,6 +716,9 @@ func remove(all []*session, s *session, yes bool, ask func(string, []line) bool,
 			return "Not deleted: " + err.Error(), false
 		}
 		renew(s, dsts)
+		if s.pinned {
+			unpin(s)
+		}
 		return "Moved \"" + name(s) + "\" to the trash.", true
 	}
 	failed := false
@@ -784,6 +820,9 @@ func archive(pool []*session, s *session) (string, bool) {
 	} else if err != nil {
 		return "Not archived: " + err.Error(), false
 	}
+	if s.pinned {
+		unpin(s)
+	}
 	return "Archived \"" + name(s) + "\".", true
 }
 
@@ -820,6 +859,115 @@ func purge(pool []*session, before time.Time) (int, error) {
 		n++
 	}
 	return n, failed
+}
+
+func order(list []*session) {
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].pinned != list[j].pinned {
+			return list[i].pinned
+		}
+		return list[i].mod.After(list[j].mod)
+	})
+}
+
+func link(id, folder string) (bool, error) {
+	live, pin, back := parts(config, folder, id), parts(pinned, folder, id), false
+	for i := range live {
+		rels := map[string]bool{}
+		for _, top := range []string{live[i], pin[i]} {
+			filepath.WalkDir(top, func(p string, d fs.DirEntry, err error) error {
+				if err == nil && !d.IsDir() {
+					rel, _ := filepath.Rel(top, p)
+					rels[rel] = true
+				}
+				return nil
+			})
+		}
+		restored := false
+		for rel := range rels {
+			l, p := filepath.Join(live[i], rel), filepath.Join(pin[i], rel)
+			li, lerr := os.Lstat(l)
+			pi, perr := os.Lstat(p)
+			from, to := l, p
+			switch {
+			case lerr == nil && perr == nil && os.SameFile(li, pi):
+				continue
+			case errors.Is(lerr, fs.ErrNotExist) && perr == nil:
+				from, to, restored = p, l, true
+			case lerr != nil:
+				continue
+			}
+			os.Remove(to)
+			if err := os.MkdirAll(filepath.Dir(to), 0o700); err != nil {
+				return back, err
+			}
+			if err := os.Link(from, to); err != nil {
+				return back, err
+			}
+		}
+		if restored {
+			now := time.Now()
+			os.Chtimes(live[i], now, now)
+			back = true
+		}
+	}
+	return back, nil
+}
+
+func keep(all []*session) bool {
+	byID := map[string][]*session{}
+	for _, s := range all {
+		byID[s.id] = append(byID[s.id], s)
+	}
+	back := false
+	for _, p := range scan(filepath.Join(pinned, "projects")) {
+		f := folder(p)
+		var live *session
+		for _, s := range byID[p.id] {
+			if folder(s) == f {
+				live = s
+			}
+		}
+		if live == nil && len(byID[p.id]) == 1 {
+			live = byID[p.id][0]
+			old := parts(pinned, f, p.id)
+			os.Remove(old[0])
+			os.RemoveAll(old[1])
+			f = folder(live)
+		}
+		b, err := link(p.id, f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claude-resume: could not keep pinned session %s: %v\n", p.id, err)
+		}
+		if live != nil {
+			live.pinned = true
+		}
+		back = back || b
+	}
+	return back
+}
+
+func pin(s *session) (string, bool) {
+	if root(s) != config {
+		return "Not pinned: only sessions in the session list can be pinned.", false
+	}
+	if _, err := link(s.id, folder(s)); err != nil {
+		unpin(s)
+		return "Not pinned: " + err.Error(), false
+	}
+	s.pinned = true
+	return "Pinned \"" + name(s) + "\".", true
+}
+
+func unpin(s *session) string {
+	for _, p := range parts(pinned, folder(s), s.id) {
+		os.RemoveAll(p)
+	}
+	if root(s) == config && s.mod.Before(time.Now().AddDate(0, 0, -30)) {
+		renew(s, files(s))
+	}
+	s.pinned = false
+	return "Unpinned \"" + name(s) + "\"."
 }
 
 func resume(s *session) {

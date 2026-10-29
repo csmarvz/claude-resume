@@ -7,7 +7,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -103,7 +102,7 @@ var csi = map[string]string{
 var ctrl = map[byte]string{
 	0x00: "ctrl-space", 0x01: "ctrl-a", 0x02: "left", 0x03: "esc", 0x04: "ctrl-d", 0x05: "end", 0x06: "right",
 	0x08: "bs", 0x7f: "bs", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "down", 0x10: "up",
-	0x12: "ctrl-r", 0x15: "ctrl-u", 0x17: "ctrl-w",
+	0x12: "ctrl-r", 0x14: "ctrl-t", 0x15: "ctrl-u", 0x17: "ctrl-w",
 }
 
 // read returns the next key, "wake" when a preview has loaded, or "" after a quiet interval.
@@ -164,6 +163,7 @@ func (t *tty) read() string {
 type view struct {
 	prompt  string
 	items   []string
+	bold    map[int]bool
 	header  []string
 	foot    string
 	preview func(i int) []line
@@ -215,7 +215,7 @@ func (t *tty) run(v *view) (string, int) {
 			if v.keys[k] {
 				return k, -1
 			}
-		case "enter", "ctrl-d", "ctrl-r":
+		case "enter", "ctrl-d", "ctrl-r", "ctrl-t":
 			if n > 0 && (k == "enter" || v.keys[k]) {
 				return k, v.shown[v.sel]
 			}
@@ -374,7 +374,11 @@ func (t *tty) draw(v *view) {
 			rows = append(rows, "\x1b[1;38;5;161;48;5;"+bg+"m▌\x1b[0;48;5;"+bg+"m \x1b[1;38;5;254m"+
 				highlight(s, v.pos[i], "\x1b[38;5;151m", "\x1b[38;5;254m")+strings.Repeat(" ", max(0, w-2-width(s)))+"\x1b[0m")
 		} else {
-			rows = append(rows, "\x1b[38;5;236m▌\x1b[0m "+highlight(s, v.pos[i], "\x1b[38;5;108m", "\x1b[39m"))
+			b := ""
+			if v.bold[v.shown[i]] {
+				b = "\x1b[1m"
+			}
+			rows = append(rows, "\x1b[38;5;236m▌\x1b[0m "+b+highlight(s, v.pos[i], "\x1b[38;5;108m", "\x1b[39m")+"\x1b[0m")
 		}
 	}
 
@@ -480,6 +484,7 @@ var lists = []command{
 	{"/list-sessions", "list:", "show the sessions"},
 	{"/list-archives", "list:archive", "show the archived sessions"},
 	{"/list-deleted", "list:trash", "show the deleted sessions"},
+	{"/exit", "exit", "quit claude-resume"},
 }
 
 var note string
@@ -494,7 +499,7 @@ func pick(all []*session) {
 	cache := map[string][]line{}
 	loading := map[string]bool{}
 	var shown []*session
-	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true, "/": true}}
+	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true, "ctrl-t": true, "/": true}}
 	v.preview = func(i int) []line {
 		if i < 0 {
 			return nil
@@ -518,6 +523,7 @@ func pick(all []*session) {
 		return nil
 	}
 	dir, msg, choose, mode := "", "", false, ""
+	var follow *session
 	show := func(m string) {
 		mode, dir, msg, v.sel, v.top, v.query, v.cur = m, "", "", 0, 0, nil, 0
 	}
@@ -526,7 +532,7 @@ func pick(all []*session) {
 	}
 	add := func(pool *[]*session, s *session) {
 		*pool = append(*pool, s)
-		sort.SliceStable(*pool, func(a, b int) bool { return (*pool)[a].mod.After((*pool)[b].mod) })
+		order(*pool)
 	}
 	ask := func(warn string) func(string, []line) bool {
 		return func(q string, lines []line) bool {
@@ -567,7 +573,19 @@ func pick(all []*session) {
 		if len(shown) == 0 {
 			dir, shown = "", append(shown, *pool...)
 		}
-		v.items = rows(shown)
+		v.items, v.bold = rows(shown), map[int]bool{}
+		for j, s := range shown {
+			v.bold[j] = s.pinned
+		}
+		if follow != nil {
+			v.filter()
+			for x, j := range v.shown {
+				if shown[j] == follow {
+					v.sel = x
+				}
+			}
+			follow = nil
+		}
 		v.header = nil
 		switch mode {
 		case "archive":
@@ -596,13 +614,33 @@ func pick(all []*session) {
 		if dir != "" {
 			esc = "folders"
 		}
-		v.foot = "Type to search · / commands · ↑↓ select · ENTER " + enter + " · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
+		pinKey := ""
+		if mode == "" {
+			pinKey = " · CTRL-T pin"
+		}
+		v.foot = "Type to search · / commands · ↑↓ select · ENTER " + enter + pinKey + " · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
 		k, i := t.run(v)
 		if k == "/" && i < 0 {
-			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") })
+			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" })
+		}
+		if k == "/" && i >= 0 && mode == "" {
+			c := command{"/pin", "pin", "keep the session at the top, safe from Claude Code's cleanup (CTRL-T)"}
+			if shown[i].pinned {
+				c = command{"/unpin", "unpin", "stop keeping the session at the top and safe (CTRL-T)"}
+			}
+			list = append([]command{c}, list...)
 		}
 		if k == "/" && len(list) > 0 {
 			k = t.command(v, list)
+		}
+		if k == "ctrl-t" {
+			k = "pin"
+			if shown[i].pinned {
+				k = "unpin"
+			}
+			if mode != "" {
+				k = ""
+			}
 		}
 		if m, ok := strings.CutPrefix(k, "list:"); ok {
 			show(m)
@@ -618,6 +656,9 @@ func pick(all []*session) {
 				t.close()
 				os.Exit(0)
 			}
+		case "exit":
+			t.close()
+			os.Exit(0)
 		case "ctrl-a":
 			choose = true
 		case "enter":
@@ -629,6 +670,17 @@ func pick(all []*session) {
 			}
 			t.close()
 			resume(shown[i])
+		case "pin", "unpin":
+			ok := true
+			if k == "pin" {
+				msg, ok = pin(shown[i])
+			} else {
+				msg = unpin(shown[i])
+			}
+			if ok {
+				order(all)
+				follow = shown[i]
+			}
 		case "archive", "restore":
 			s, ok := shown[i], false
 			if k == "archive" {
