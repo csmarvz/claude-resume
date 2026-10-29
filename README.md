@@ -35,6 +35,8 @@ claude-resume <id>             resume a session in its folder (a unique ID prefi
 claude-resume -r <id> <title>  rename a session (--rename)
 claude-resume -d <id>          delete a session after a confirmation (--delete)
 claude-resume -d -y <id>       delete without asking; needs the full session ID (--yes)
+claude-resume --archive <id>   archive a session so that it never expires
+claude-resume --restore <id>   move an archived session back to the session list
 claude-resume update           install the latest release
 claude-resume -v               show the installed version (--version)
 claude-resume -h               show help (--help)
@@ -47,9 +49,16 @@ You can:
 * Preview sessions
 * Search sessions
 * Rename sessions
+* Archive sessions
 * Delete sessions
 
+In the picker, type `/` to open the commands for the selected session: `/archive`, `/list-archives`, `/rename`, `/delete` and `/folders`. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
+
 Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
+
+## Archiving sessions
+
+`/archive` moves a session's files into `~/.claude/claude-resume/archive`. The session leaves the list, and Claude Code's cleanup doesn't look in that folder, so it never expires. `/list-archives` shows the archived sessions: ENTER restores one and resumes it, `/restore` only restores it. A restored session gets today's date, so Claude Code's 30 days start again from the restore. Sessions that are open in a running Claude Code process are refused.
 
 ## Deleting sessions
 
@@ -57,7 +66,7 @@ A delete removes the session's transcript, its folder of subagent and tool outpu
 
 `-y` skips the dialog and works without a terminal, so you can script it. It only accepts a full session ID, never a prefix.
 
-Claude Code also deletes old transcripts on its own: by default, sessions untouched for 30 days (the `cleanupPeriodDays` setting).
+Claude Code also deletes old transcripts on its own: by default, sessions untouched for 30 days (the `cleanupPeriodDays` setting). Archive a session to keep it.
 
 ## Updating
 

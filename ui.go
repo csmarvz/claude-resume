@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -271,6 +274,12 @@ func (t *tty) run(v *view) (string, int) {
 			v.query = append(v.query[:i], v.query[v.cur:]...)
 			v.cur, edited = i, true
 		default:
+			if k == "/" && (len(v.query) == 0 || v.dim) && v.keys[k] {
+				if n == 0 {
+					return k, -1
+				}
+				return k, v.shown[v.sel]
+			}
 			if utf8.RuneCountInString(k) == 1 {
 				r := []rune(k)[0]
 				v.query = append(v.query[:v.cur], append([]rune{r}, v.query[v.cur:]...)...)
@@ -376,10 +385,11 @@ func (t *tty) draw(v *view) {
 			fr = "\x1b[31m"
 		}
 		rows = append(rows, fr+"╭"+strings.Repeat("─", max(0, w-2))+"╮\x1b[0m")
-		var body []line
+		i := -1
 		if len(v.shown) > 0 {
-			body = wrap(v.preview(v.shown[v.sel]), inner)
+			i = v.shown[v.sel]
 		}
+		body := wrap(v.preview(i), inner)
 		v.pscroll = min(v.pscroll, max(0, len(body)-(ph-2)))
 		for i := v.pscroll; i < v.pscroll+ph-2; i++ {
 			s, style := "", ""
@@ -441,18 +451,40 @@ func folders(all []*session) []string {
 	return out
 }
 
+type command struct{ name, key, about string }
+
+var (
+	sessionCmds = []command{
+		{"/archive", "archive", "move the session to the archive, where it never expires"},
+		{"/list-archives", "list-archives", "show the archived sessions"},
+		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
+		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
+	}
+	archivedCmds = []command{
+		{"/restore", "restore", "move the session back to the session list"},
+		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
+		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
+	}
+)
+
 var note string
 
 func pick(all []*session) {
 	note = notice()
 	t := openTTY()
 	loadAll(all)
+	arch := scan(filepath.Join(archived, "projects"))
 	var mu sync.Mutex
 	cache := map[string][]line{}
 	loading := map[string]bool{}
 	var shown []*session
-	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true}}
+	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true, "/": true}}
 	v.preview = func(i int) []line {
+		if i < 0 {
+			return nil
+		}
 		s := shown[i]
 		mu.Lock()
 		defer mu.Unlock()
@@ -471,10 +503,21 @@ func pick(all []*session) {
 		}
 		return nil
 	}
-	dir, msg, choose := "", "", false
+	dir, msg, choose, inArch := "", "", false, false
+	show := func(a bool) {
+		inArch, dir, v.sel, v.top, v.query, v.cur = a, "", 0, 0, nil, 0
+	}
+	drop := func(pool *[]*session, s *session) {
+		*pool = slices.DeleteFunc(*pool, func(o *session) bool { return o == s })
+	}
 	for {
+		pool, other := &all, &arch
+		if inArch {
+			pool, other = &arch, &all
+			loadAll(arch)
+		}
 		if choose {
-			f := &view{prompt: "folder> ", items: folders(all), foot: "↑↓ select · ENTER show its sessions · ESC all sessions"}
+			f := &view{prompt: "folder> ", items: folders(*pool), foot: "↑↓ select · ENTER show its sessions · ESC all sessions"}
 			k, i := t.run(f)
 			dir = ""
 			if k == "enter" {
@@ -483,16 +526,19 @@ func pick(all []*session) {
 			msg, choose, v.sel, v.top = "", false, 0, 0
 		}
 		shown = shown[:0]
-		for _, s := range all {
+		for _, s := range *pool {
 			if dir == "" || tilde(s.cwd) == dir {
 				shown = append(shown, s)
 			}
 		}
 		if len(shown) == 0 {
-			dir, shown = "", append(shown, all...)
+			dir, shown = "", append(shown, *pool...)
 		}
 		v.items = rows(shown)
 		v.header = nil
+		if inArch {
+			v.header = append(v.header, "archived sessions")
+		}
 		if dir != "" {
 			v.header = append(v.header, "folder: "+dir)
 		}
@@ -502,24 +548,58 @@ func pick(all []*session) {
 		if len(v.header) == 0 {
 			v.header = []string{""}
 		}
-		esc := "quit"
+		esc, enter, cmds := "quit", "resume", sessionCmds
+		if inArch {
+			esc, enter, cmds = "all sessions", "restore and resume", archivedCmds
+		}
 		if dir != "" {
 			esc = "folders"
 		}
-		v.foot = "Type to search · ↑↓ select · ENTER resume · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
+		v.foot = "Type to search · / commands · ↑↓ select · ENTER " + enter + " · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
 		k, i := t.run(v)
+		if k == "/" && i < 0 {
+			cmds = slices.DeleteFunc(slices.Clone(cmds), func(c command) bool { return c.key != "list-archives" })
+		}
+		if k == "/" && len(cmds) > 0 {
+			k = t.command(v, cmds)
+		}
 		switch k {
 		case "esc":
-			if dir == "" {
+			if dir != "" {
+				choose = true
+			} else if inArch {
+				msg = ""
+				show(false)
+			} else {
 				t.close()
 				os.Exit(0)
 			}
-			choose = true
 		case "ctrl-a":
 			choose = true
+		case "list-archives":
+			msg = ""
+			show(true)
 		case "enter":
+			if inArch {
+				var ok bool
+				if msg, ok = restore(arch, shown[i]); !ok {
+					break
+				}
+			}
 			t.close()
 			resume(shown[i])
+		case "archive", "restore":
+			s, ok := shown[i], false
+			if k == "archive" {
+				msg, ok = archive(all, s)
+			} else {
+				msg, ok = restore(arch, s)
+			}
+			if ok {
+				drop(pool, s)
+				*other = append(*other, s)
+				sort.SliceStable(*other, func(a, b int) bool { return (*other)[a].mod.After((*other)[b].mod) })
+			}
 		case "ctrl-r":
 			s := shown[i]
 			e := &view{prompt: "rename> ", items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(s.title),
@@ -537,7 +617,7 @@ func pick(all []*session) {
 		case "ctrl-d":
 			t.drain()
 			var ok bool
-			msg, ok = remove(all, shown[i], false, func(q string, lines []line) bool {
+			msg, ok = remove(*pool, shown[i], false, func(q string, lines []line) bool {
 				saved := *v
 				defer func() { *v = saved }()
 				v.preview, v.foot, v.warn, v.dim, v.hide, v.pscroll = func(int) []line { return lines }, q, true, true, false, 0
@@ -554,17 +634,62 @@ func pick(all []*session) {
 				}
 			})
 			if ok {
-				for j, s := range all {
-					if s == shown[i] {
-						all = append(all[:j], all[j+1:]...)
-						break
-					}
-				}
+				drop(pool, shown[i])
 			}
-			if len(all) == 0 {
-				t.close()
-				fmt.Println(msg)
-				os.Exit(0)
+		}
+	}
+}
+
+func (t *tty) command(v *view, cmds []command) string {
+	saved := *v
+	defer func() { *v = saved }()
+	q, sel := "/", 0
+	for redraw := true; ; {
+		var match []command
+		for _, c := range cmds {
+			if strings.Contains(c.name, q[1:]) {
+				match = append(match, c)
+			}
+		}
+		sel = max(0, min(sel, len(match)-1))
+		if redraw || t.resized() {
+			var lines []line
+			for j, c := range match {
+				var pos []int
+				for p := strings.Index(c.name, q[1:]); p < len(c.name) && len(pos) < len(q)-1; p++ {
+					pos = append(pos, p)
+				}
+				l := line{"", "  " + highlight(c.name, pos, "\x1b[1m", "\x1b[22m") + strings.Repeat(" ", 16-len(c.name)) + c.about}
+				if j == sel {
+					l = line{"38;5;151", "› " + l.text[2:]}
+				}
+				lines = append(lines, l)
+			}
+			v.query, v.cur, v.dim, v.hide, v.pscroll = []rune(q), len(q), false, false, 0
+			v.preview, v.foot = func(int) []line { return lines }, "Type a command · ↑↓ select · ENTER run · ESC back"
+			t.draw(v)
+		}
+		k := t.read()
+		redraw = k != "" && k != "wake"
+		switch k {
+		case "esc":
+			return ""
+		case "enter":
+			if len(match) > 0 {
+				return match[sel].key
+			}
+		case "up":
+			sel--
+		case "down":
+			sel++
+		case "bs":
+			_, n := utf8.DecodeLastRuneInString(q)
+			if q = q[:len(q)-n]; q == "" {
+				return ""
+			}
+		default:
+			if utf8.RuneCountInString(k) == 1 {
+				q, sel = q+strings.ToLower(k), 0
 			}
 		}
 	}

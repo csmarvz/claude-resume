@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -25,6 +26,8 @@ const usageText = `usage: claude-resume                  pick a session, or list
        claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
        claude-resume -r <id> <title>  rename a session (--rename)
        claude-resume -d [-y] <id>     delete a session for good; asks first unless -y (--delete, --yes)
+       claude-resume --archive <id>   archive a session so that it never expires
+       claude-resume --restore <id>   move an archived session back to the session list
        claude-resume update           install the latest release
        claude-resume -v               show the installed version (--version)
 `
@@ -33,6 +36,7 @@ var (
 	home     string
 	config   string
 	projects string
+	archived string
 	cleanup  = func() {}
 
 	customMark     = []byte(`"type":"custom-title"`)
@@ -153,6 +157,10 @@ func main() {
 		if !isHex(target) || strings.TrimSpace(title) == "" {
 			usage(1)
 		}
+	case arg == "--archive" || arg == "--restore":
+		if target = args[1]; len(args) != 3 || !isHex(target) {
+			usage(1)
+		}
 	case strings.HasPrefix(arg, "-") || !isHex(arg):
 		usage(1)
 	}
@@ -171,8 +179,9 @@ func main() {
 		die("no sessions found in %s", shown)
 	}
 	projects = filepath.Join(config, "projects")
-	all := scan()
-	if len(all) == 0 {
+	archived = filepath.Join(config, "claude-resume", "archive")
+	all := scan(projects)
+	if len(all) == 0 && arg != "--restore" && (arg != "" || len(scan(filepath.Join(archived, "projects"))) == 0) {
 		die("no sessions found in %s", projects)
 	}
 
@@ -197,6 +206,19 @@ func main() {
 			die("%s", msg)
 		}
 		fmt.Println(msg)
+	case "--archive":
+		msg, ok := archive(all, mustFind(all, target))
+		if !ok {
+			die("%s", msg)
+		}
+		fmt.Println(msg)
+	case "--restore":
+		arch := scan(filepath.Join(archived, "projects"))
+		msg, ok := restore(arch, mustFind(arch, target))
+		if !ok {
+			die("%s", msg)
+		}
+		fmt.Println(msg)
 	case "-r", "--rename":
 		msg, ok := rename(mustFind(all, target), title)
 		if !ok {
@@ -214,7 +236,7 @@ func main() {
 	}
 }
 
-func scan() []*session {
+func scan(projects string) []*session {
 	var list []*session
 	dirs, _ := os.ReadDir(projects)
 	for _, d := range dirs {
@@ -430,8 +452,12 @@ func runeWidth(r rune) int {
 }
 
 func cut(s string, n int) string {
-	w := 0
+	w, esc := 0, false
 	for i, r := range s {
+		if esc = esc || r == 0x1b; esc {
+			esc = r != 'm'
+			continue
+		}
 		if w += runeWidth(r); w > n {
 			return s[:i]
 		}
@@ -440,8 +466,12 @@ func cut(s string, n int) string {
 }
 
 func width(s string) int {
-	w := 0
+	w, esc := 0, false
 	for _, r := range s {
+		if esc = esc || r == 0x1b; esc {
+			esc = r != 'm'
+			continue
+		}
 		w += runeWidth(r)
 	}
 	return w
@@ -550,11 +580,23 @@ func openPid(id string) string {
 	return ""
 }
 
+func root(s *session) string { return filepath.Dir(filepath.Dir(filepath.Dir(s.path))) }
+
 func files(s *session) []string {
 	var paths []string
-	for _, p := range []string{s.path, strings.TrimSuffix(s.path, ".jsonl"), filepath.Join(config, "file-history", s.id), filepath.Join(config, "session-env", s.id)} {
+	for _, p := range []string{s.path, strings.TrimSuffix(s.path, ".jsonl"), filepath.Join(root(s), "file-history", s.id), filepath.Join(root(s), "session-env", s.id)} {
 		if _, err := os.Lstat(p); err == nil {
 			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
+func own(pool []*session, s *session) []string {
+	paths := files(s)
+	for _, o := range pool {
+		if o != s && o.id == s.id {
+			paths = slices.DeleteFunc(paths, func(p string) bool { return filepath.Dir(p) != filepath.Dir(s.path) })
 		}
 	}
 	return paths
@@ -598,18 +640,9 @@ func remove(all []*session, s *session, yes bool, ask func(string, []line) bool)
 	if !s.loaded {
 		s.load()
 	}
-	paths := files(s)
-	for _, o := range all {
-		if o != s && o.id == s.id {
-			paths = slices.DeleteFunc(paths, func(p string) bool { return filepath.Dir(p) != filepath.Dir(s.path) })
-		}
-	}
+	paths := own(all, s)
 	if len(paths) == 0 {
 		return "Not deleted: no files found for session " + s.id, false
-	}
-	name := s.title
-	if name == "" {
-		name = s.id
 	}
 	if !yes {
 		title := s.title
@@ -642,9 +675,9 @@ func remove(all []*session, s *session, yes bool, ask func(string, []line) bool)
 		}
 	}
 	if failed {
-		return "Only partly deleted \"" + name + "\", see the errors above.", false
+		return "Only partly deleted \"" + name(s) + "\", see the errors above.", false
 	}
-	return "Deleted \"" + name + "\".", true
+	return "Deleted \"" + name(s) + "\".", true
 }
 
 func rename(s *session, title string) (string, bool) {
@@ -681,6 +714,74 @@ func rename(s *session, title string) (string, bool) {
 	os.Chtimes(s.path, st.ModTime(), st.ModTime())
 	s.title = title
 	return "Renamed to \"" + title + "\".", true
+}
+
+func move(pool []*session, s *session, to string) ([]string, error) {
+	from := root(s)
+	var done, dsts []string
+	for _, p := range own(pool, s) {
+		rel, _ := filepath.Rel(from, p)
+		dst := filepath.Join(to, rel)
+		if _, err := os.Lstat(dst); err == nil {
+			return nil, fs.ErrExist
+		}
+		dsts = append(dsts, dst)
+	}
+	for _, dst := range dsts {
+		rel, _ := filepath.Rel(to, dst)
+		err := os.MkdirAll(filepath.Dir(dst), 0o700)
+		if err == nil {
+			err = os.Rename(filepath.Join(from, rel), dst)
+		}
+		if err != nil {
+			for _, d := range done {
+				rel, _ := filepath.Rel(to, d)
+				os.Rename(d, filepath.Join(from, rel))
+			}
+			return nil, err
+		}
+		done = append(done, dst)
+	}
+	rel, _ := filepath.Rel(from, s.path)
+	s.path = filepath.Join(to, rel)
+	return dsts, nil
+}
+
+func name(s *session) string {
+	if !s.loaded {
+		s.load()
+	}
+	if s.title == "" {
+		return s.id
+	}
+	return s.title
+}
+
+func archive(pool []*session, s *session) (string, bool) {
+	if pid := openPid(s.id); pid != "" {
+		return fmt.Sprintf("Not archived: session %s is open in Claude Code (pid %s). Close it first.", s.id[:8], pid), false
+	}
+	if _, err := move(pool, s, archived); errors.Is(err, fs.ErrExist) {
+		return "Not archived: the archive already has a session with this ID.", false
+	} else if err != nil {
+		return "Not archived: " + err.Error(), false
+	}
+	return "Archived \"" + name(s) + "\".", true
+}
+
+func restore(pool []*session, s *session) (string, bool) {
+	dsts, err := move(pool, s, config)
+	if errors.Is(err, fs.ErrExist) {
+		return "Not restored: the session list already has a session with this ID.", false
+	}
+	if err != nil {
+		return "Not restored: " + err.Error(), false
+	}
+	s.mod = time.Now()
+	for _, d := range dsts {
+		os.Chtimes(d, s.mod, s.mod)
+	}
+	return "Restored \"" + name(s) + "\".", true
 }
 
 func resume(s *session) {

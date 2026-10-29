@@ -1,6 +1,10 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -68,6 +72,7 @@ func TestWidth(t *testing.T) {
 		{"🚀go", 4, "🚀go"},
 		{"éte", 3, "éte"},
 		{"✔️ok", 3, "✔️ok"},
+		{"\x1b[1mab\x1b[22mcdef", 6, "\x1b[1mab\x1b[22mcd"},
 	} {
 		if got := width(c.s); got != c.w {
 			t.Errorf("width(%q) = %d, want %d", c.s, got, c.w)
@@ -75,5 +80,26 @@ func TestWidth(t *testing.T) {
 		if got := cut(c.s, 4); got != c.cut4 {
 			t.Errorf("cut(%q, 4) = %q, want %q", c.s, got, c.cut4)
 		}
+	}
+}
+
+func TestMove(t *testing.T) {
+	cfg, id := t.TempDir(), "02c5f13e-4af1-44da-a134-90f6fafa5d25"
+	to := filepath.Join(cfg, "claude-resume", "archive")
+	for _, p := range []string{"projects/p/" + id + ".jsonl", "projects/p/" + id + "/sub", "file-history/" + id + "/f", "session-env/" + id + "/e"} {
+		os.MkdirAll(filepath.Join(cfg, filepath.Dir(p)), 0o700)
+		os.WriteFile(filepath.Join(cfg, p), nil, 0o600)
+	}
+	s := &session{path: filepath.Join(cfg, "projects/p", id+".jsonl"), id: id}
+	if dsts, err := move(nil, s, to); err != nil || len(dsts) != 4 || len(files(s)) != 4 || root(s) != to {
+		t.Fatal(dsts, err, files(s))
+	}
+	os.MkdirAll(filepath.Join(cfg, "file-history", id), 0o700)
+	if _, err := move(nil, s, cfg); !errors.Is(err, fs.ErrExist) || root(s) != to {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(cfg, "file-history", id))
+	if _, err := move(nil, s, cfg); err != nil || len(files(s)) != 4 || root(s) != cfg {
+		t.Fatal(err, files(s))
 	}
 }
