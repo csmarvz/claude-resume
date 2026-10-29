@@ -169,7 +169,7 @@ type view struct {
 	preview func(i int) []line
 	keys    map[string]bool
 	edit    bool
-	warn    bool
+	warn    string
 
 	query     []rune
 	cur       int
@@ -368,7 +368,7 @@ func (t *tty) draw(v *view) {
 		s := clip(v.items[v.shown[i]], w-2)
 		if i == v.sel {
 			bg := "236"
-			if v.warn {
+			if v.warn == red {
 				bg = "52"
 			}
 			rows = append(rows, "\x1b[1;38;5;161;48;5;"+bg+"m▌\x1b[0;48;5;"+bg+"m \x1b[1;38;5;254m"+
@@ -381,8 +381,8 @@ func (t *tty) draw(v *view) {
 	if ph > 0 {
 		inner := w - 4
 		fr := "\x1b[38;5;59m"
-		if v.warn {
-			fr = "\x1b[31m"
+		if v.warn != "" {
+			fr = "\x1b[" + v.warn + "m"
 		}
 		rows = append(rows, fr+"╭"+strings.Repeat("─", max(0, w-2))+"╮\x1b[0m")
 		i := -1
@@ -418,8 +418,8 @@ func (t *tty) draw(v *view) {
 		}
 		if i == h-1 {
 			fc := "\x1b[38;5;145m"
-			if v.warn {
-				fc = "\x1b[1;31m"
+			if v.warn != "" {
+				fc = "\x1b[1;" + v.warn + "m"
 			}
 			s = fc + clip(v.foot, w) + "\x1b[0m"
 			right, color := label(), "\x1b[38;5;243m"
@@ -451,23 +451,36 @@ func folders(all []*session) []string {
 	return out
 }
 
+const red, orange = "31", "38;5;215"
+
 type command struct{ name, key, about string }
 
-var (
-	sessionCmds = []command{
+var cmds = map[string][]command{
+	"": {
 		{"/archive", "archive", "move the session to the archive, where it never expires"},
-		{"/list-archives", "list-archives", "show the archived sessions"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
-		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
+		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
-	}
-	archivedCmds = []command{
+	},
+	"archive": {
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
-		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
+		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
-	}
-)
+	},
+	"trash": {
+		{"/restore", "restore", "move the session back to the session list"},
+		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
+		{"/empty-trash", "empty-trash", "delete all deleted sessions for good"},
+		{"/folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
+	},
+}
+
+var lists = []command{
+	{"/list-sessions", "list:", "show the sessions"},
+	{"/list-archives", "list:archive", "show the archived sessions"},
+	{"/list-deleted", "list:trash", "show the deleted sessions"},
+}
 
 var note string
 
@@ -475,7 +488,8 @@ func pick(all []*session) {
 	note = notice()
 	t := openTTY()
 	loadAll(all)
-	arch := scan(filepath.Join(archived, "projects"))
+	arch, bin := scan(filepath.Join(archived, "projects")), scan(filepath.Join(trash, "projects"))
+	pools := map[string]*[]*session{"": &all, "archive": &arch, "trash": &bin}
 	var mu sync.Mutex
 	cache := map[string][]line{}
 	loading := map[string]bool{}
@@ -503,19 +517,38 @@ func pick(all []*session) {
 		}
 		return nil
 	}
-	dir, msg, choose, inArch := "", "", false, false
-	show := func(a bool) {
-		inArch, dir, v.sel, v.top, v.query, v.cur = a, "", 0, 0, nil, 0
+	dir, msg, choose, mode := "", "", false, ""
+	show := func(m string) {
+		mode, dir, msg, v.sel, v.top, v.query, v.cur = m, "", "", 0, 0, nil, 0
 	}
 	drop := func(pool *[]*session, s *session) {
 		*pool = slices.DeleteFunc(*pool, func(o *session) bool { return o == s })
 	}
-	for {
-		pool, other := &all, &arch
-		if inArch {
-			pool, other = &arch, &all
-			loadAll(arch)
+	add := func(pool *[]*session, s *session) {
+		*pool = append(*pool, s)
+		sort.SliceStable(*pool, func(a, b int) bool { return (*pool)[a].mod.After((*pool)[b].mod) })
+	}
+	ask := func(warn string) func(string, []line) bool {
+		return func(q string, lines []line) bool {
+			saved := *v
+			defer func() { *v = saved }()
+			v.preview, v.foot, v.warn, v.dim, v.hide, v.pscroll = func(int) []line { return lines }, q, warn, true, false, 0
+			redraw := true
+			for {
+				if redraw || t.resized() {
+					t.draw(v)
+				}
+				k := t.read()
+				redraw = false
+				if k != "" && k != "wake" {
+					return k == "y" || k == "Y"
+				}
+			}
 		}
+	}
+	for {
+		pool := pools[mode]
+		loadAll(*pool)
 		if choose {
 			f := &view{prompt: "folder> ", items: folders(*pool), foot: "↑↓ select · ENTER show its sessions · ESC all sessions"}
 			k, i := t.run(f)
@@ -536,8 +569,11 @@ func pick(all []*session) {
 		}
 		v.items = rows(shown)
 		v.header = nil
-		if inArch {
+		switch mode {
+		case "archive":
 			v.header = append(v.header, "archived sessions")
+		case "trash":
+			v.header = append(v.header, "deleted sessions, kept for 30 days after the delete")
 		}
 		if dir != "" {
 			v.header = append(v.header, "folder: "+dir)
@@ -548,9 +584,14 @@ func pick(all []*session) {
 		if len(v.header) == 0 {
 			v.header = []string{""}
 		}
-		esc, enter, cmds := "quit", "resume", sessionCmds
-		if inArch {
-			esc, enter, cmds = "all sessions", "restore and resume", archivedCmds
+		esc, enter, list := "quit", "resume", slices.Clone(cmds[mode])
+		for _, c := range lists {
+			if c.key != "list:"+mode {
+				list = append(list, c)
+			}
+		}
+		if mode != "" {
+			esc, enter = "all sessions", "restore and resume"
 		}
 		if dir != "" {
 			esc = "folders"
@@ -558,31 +599,31 @@ func pick(all []*session) {
 		v.foot = "Type to search · / commands · ↑↓ select · ENTER " + enter + " · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
 		k, i := t.run(v)
 		if k == "/" && i < 0 {
-			cmds = slices.DeleteFunc(slices.Clone(cmds), func(c command) bool { return c.key != "list-archives" })
+			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") })
 		}
-		if k == "/" && len(cmds) > 0 {
-			k = t.command(v, cmds)
+		if k == "/" && len(list) > 0 {
+			k = t.command(v, list)
+		}
+		if m, ok := strings.CutPrefix(k, "list:"); ok {
+			show(m)
+			continue
 		}
 		switch k {
 		case "esc":
 			if dir != "" {
 				choose = true
-			} else if inArch {
-				msg = ""
-				show(false)
+			} else if mode != "" {
+				show("")
 			} else {
 				t.close()
 				os.Exit(0)
 			}
 		case "ctrl-a":
 			choose = true
-		case "list-archives":
-			msg = ""
-			show(true)
 		case "enter":
-			if inArch {
+			if mode != "" {
 				var ok bool
-				if msg, ok = restore(arch, shown[i]); !ok {
+				if msg, ok = restore(*pool, shown[i]); !ok {
 					break
 				}
 			}
@@ -593,12 +634,15 @@ func pick(all []*session) {
 			if k == "archive" {
 				msg, ok = archive(all, s)
 			} else {
-				msg, ok = restore(arch, s)
+				msg, ok = restore(*pool, s)
 			}
 			if ok {
+				to := &all
+				if k == "archive" {
+					to = &arch
+				}
 				drop(pool, s)
-				*other = append(*other, s)
-				sort.SliceStable(*other, func(a, b int) bool { return (*other)[a].mod.After((*other)[b].mod) })
+				add(to, s)
 			}
 		case "ctrl-r":
 			s := shown[i]
@@ -616,25 +660,35 @@ func pick(all []*session) {
 			v.hide = e.hide
 		case "ctrl-d":
 			t.drain()
-			var ok bool
-			msg, ok = remove(*pool, shown[i], false, func(q string, lines []line) bool {
-				saved := *v
-				defer func() { *v = saved }()
-				v.preview, v.foot, v.warn, v.dim, v.hide, v.pscroll = func(int) []line { return lines }, q, true, true, false, 0
-				redraw := true
-				for {
-					if redraw || t.resized() {
-						t.draw(v)
-					}
-					k := t.read()
-					redraw = false
-					if k != "" && k != "wake" {
-						return k == "y" || k == "Y"
-					}
+			s, to, color, ok := shown[i], trash, orange, false
+			if mode == "trash" {
+				to, color = "", red
+			}
+			if msg, ok = remove(*pool, s, false, ask(color), to); ok {
+				drop(pool, s)
+				if to != "" {
+					add(&bin, s)
 				}
-			})
-			if ok {
-				drop(pool, shown[i])
+			}
+		case "empty-trash":
+			t.drain()
+			var total int64
+			for _, s := range bin {
+				for _, p := range own(bin, s) {
+					total += size(p)
+				}
+			}
+			lines := []line{{"1;31", "WARNING: this permanently deletes every session below. It cannot be undone."}, {}}
+			for _, r := range rows(bin) {
+				lines = append(lines, line{"", r})
+			}
+			msg = "Cancelled, nothing was deleted."
+			if ask(red)(fmt.Sprintf("Empty the trash? %sB · Y confirm · any other key cancels", human(total)), lines) {
+				n, err := purge(bin, time.Now().Add(time.Hour))
+				if msg = fmt.Sprintf("Emptied the trash: %d deleted for good.", n); err != nil {
+					msg = "Only partly emptied the trash: " + err.Error()
+				}
+				bin = scan(filepath.Join(trash, "projects"))
 			}
 		}
 	}
@@ -696,7 +750,6 @@ func (t *tty) command(v *view, cmds []command) string {
 }
 
 func (t *tty) confirm(_ string, lines []line) bool {
-	lines = append([]line{{"1;31", "WARNING: this permanently deletes the session below. It cannot be undone."}, {}}, lines...)
 	t.drain()
 	sel, last, redraw := 0, time.Now(), true
 	for {

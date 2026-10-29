@@ -25,9 +25,9 @@ const usageText = `usage: claude-resume                  pick a session, or list
        claude-resume -a               list all sessions (--all)
        claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
        claude-resume -r <id> <title>  rename a session (--rename)
-       claude-resume -d [-y] <id>     delete a session for good; asks first unless -y (--delete, --yes)
+       claude-resume -d [-y] <id>     move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
        claude-resume --archive <id>   archive a session so that it never expires
-       claude-resume --restore <id>   move an archived session back to the session list
+       claude-resume --restore <id>   move an archived or deleted session back to the session list
        claude-resume update           install the latest release
        claude-resume -v               show the installed version (--version)
 `
@@ -37,6 +37,7 @@ var (
 	config   string
 	projects string
 	archived string
+	trash    string
 	cleanup  = func() {}
 
 	customMark     = []byte(`"type":"custom-title"`)
@@ -179,7 +180,9 @@ func main() {
 		die("no sessions found in %s", shown)
 	}
 	projects = filepath.Join(config, "projects")
-	archived = filepath.Join(config, "claude-resume", "archive")
+	archived = filepath.Join(home, ".claude-resume", "archive")
+	trash = filepath.Join(home, ".claude-resume", "trash")
+	purge(scan(filepath.Join(trash, "projects")), time.Now().AddDate(0, 0, -30))
 	all := scan(projects)
 	if len(all) == 0 && arg != "--restore" && (arg != "" || len(scan(filepath.Join(archived, "projects"))) == 0) {
 		die("no sessions found in %s", projects)
@@ -198,7 +201,7 @@ func main() {
 		if !yes {
 			t = openTTY()
 		}
-		msg, ok := remove(all, s, yes, t.confirm)
+		msg, ok := remove(all, s, yes, t.confirm, trash)
 		if t != nil {
 			t.close()
 		}
@@ -213,8 +216,8 @@ func main() {
 		}
 		fmt.Println(msg)
 	case "--restore":
-		arch := scan(filepath.Join(archived, "projects"))
-		msg, ok := restore(arch, mustFind(arch, target))
+		pool := append(scan(filepath.Join(archived, "projects")), scan(filepath.Join(trash, "projects"))...)
+		msg, ok := restore(pool, mustFind(pool, target))
 		if !ok {
 			die("%s", msg)
 		}
@@ -630,7 +633,7 @@ func human(n int64) string {
 	return fmt.Sprintf("%.0f%c", math.Ceil(f), "KMGT"[i-1])
 }
 
-func remove(all []*session, s *session, yes bool, ask func(string, []line) bool) (string, bool) {
+func remove(all []*session, s *session, yes bool, ask func(string, []line) bool, to string) (string, bool) {
 	if !isUUID(s.id) {
 		return "Not deleted: unexpected session file " + s.path, false
 	}
@@ -649,23 +652,38 @@ func remove(all []*session, s *session, yes bool, ask func(string, []line) bool)
 		if title == "" {
 			title = "(untitled)"
 		}
+		warn, list, q := line{"1;31", "WARNING: this permanently deletes the session below. It cannot be undone."}, "Files to delete in ", "Delete this session for good? %sB · Y confirm · any other key cancels"
+		if to != "" {
+			warn, list, q = line{"", "This moves the session below to the trash, where it stays for 30 days."}, "Files to move to the trash from ", "Move this session to the trash? %sB · Y confirm · any other key cancels"
+		}
 		lines := []line{
-			{"1", title}, {"2", tilde(s.cwd) + "  ·  " + date(s) + "  ·  " + s.id}, {},
-			{"", "Files to delete in " + tilde(config) + ":"},
+			warn, {}, {"1", title}, {"2", tilde(s.cwd) + "  ·  " + date(s) + "  ·  " + s.id}, {},
+			{"", list + tilde(root(s)) + ":"},
 		}
 		var total int64
 		for _, p := range paths {
 			n := size(p)
 			total += n
-			rel, _ := filepath.Rel(config, p)
+			rel, _ := filepath.Rel(root(s), p)
 			lines = append(lines, line{"", fmt.Sprintf("  %6s  %s", human(n), squeeze(rel))})
 		}
-		if !ask(fmt.Sprintf("Delete this session for good? %sB · Y delete · any other key cancels", human(total)), lines) {
+		if !ask(fmt.Sprintf(q, human(total)), lines) {
 			return "Cancelled, nothing was deleted.", false
 		}
 	}
 	if pid := openPid(s.id); pid != "" {
 		return fmt.Sprintf("Not deleted: session %s was opened in Claude Code (pid %s). Close it first.", s.id[:8], pid), false
+	}
+	if to != "" {
+		dsts, err := move(all, s, to)
+		if errors.Is(err, fs.ErrExist) {
+			return "Not deleted: the trash already has a session with this ID.", false
+		}
+		if err != nil {
+			return "Not deleted: " + err.Error(), false
+		}
+		renew(s, dsts)
+		return "Moved \"" + name(s) + "\" to the trash.", true
 	}
 	failed := false
 	for _, p := range paths {
@@ -777,11 +795,31 @@ func restore(pool []*session, s *session) (string, bool) {
 	if err != nil {
 		return "Not restored: " + err.Error(), false
 	}
-	s.mod = time.Now()
-	for _, d := range dsts {
-		os.Chtimes(d, s.mod, s.mod)
-	}
+	renew(s, dsts)
 	return "Restored \"" + name(s) + "\".", true
+}
+
+func renew(s *session, paths []string) {
+	s.mod = time.Now()
+	for _, p := range paths {
+		os.Chtimes(p, s.mod, s.mod)
+	}
+}
+
+func purge(pool []*session, before time.Time) (int, error) {
+	n, failed := 0, error(nil)
+	for _, s := range pool {
+		if !s.mod.Before(before) {
+			continue
+		}
+		for _, p := range own(pool, s) {
+			if err := os.RemoveAll(p); err != nil && failed == nil {
+				failed = err
+			}
+		}
+		n++
+	}
+	return n, failed
 }
 
 func resume(s *session) {

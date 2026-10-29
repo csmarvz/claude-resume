@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIDs(t *testing.T) {
@@ -101,5 +102,16 @@ func TestMove(t *testing.T) {
 	os.Remove(filepath.Join(cfg, "file-history", id))
 	if _, err := move(nil, s, cfg); err != nil || len(files(s)) != 4 || root(s) != cfg {
 		t.Fatal(err, files(s))
+	}
+}
+
+func TestPurge(t *testing.T) {
+	dir := t.TempDir()
+	old, recent := &session{path: filepath.Join(dir, "projects/p/a.jsonl"), id: "a", mod: time.Now().AddDate(0, 0, -31)}, &session{path: filepath.Join(dir, "projects/p/b.jsonl"), id: "b", mod: time.Now()}
+	os.MkdirAll(filepath.Join(dir, "projects/p"), 0o700)
+	os.WriteFile(old.path, nil, 0o600)
+	os.WriteFile(recent.path, nil, 0o600)
+	if n, err := purge([]*session{old, recent}, time.Now().AddDate(0, 0, -30)); n != 1 || err != nil || len(files(old)) != 0 || len(files(recent)) != 1 {
+		t.Fatal(n, err)
 	}
 }

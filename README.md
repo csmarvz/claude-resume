@@ -1,5 +1,5 @@
 > [!WARNING]
-> This is alpha software. It reads Claude Code's internal session files, whose format can change with any Claude Code update, and its delete feature removes files for good. It may break, show wrong data or delete more than you expect. Back up `~/.claude` before deleting sessions you care about.
+> This is alpha software. It reads Claude Code's internal session files, whose format can change with any Claude Code update, and it moves and deletes those files. It may break, show wrong data or delete more than you expect. Back up `~/.claude` before deleting sessions you care about.
 
 # claude-resume
 List all your claude sessions and resume them in the folder they were started in.
@@ -33,10 +33,10 @@ claude-resume                  pick a session, or list the last 10 outside a ter
 claude-resume -a               list all sessions (--all)
 claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
 claude-resume -r <id> <title>  rename a session (--rename)
-claude-resume -d <id>          delete a session after a confirmation (--delete)
-claude-resume -d -y <id>       delete without asking; needs the full session ID (--yes)
+claude-resume -d <id>          move a session to the trash after a confirmation (--delete)
+claude-resume -d -y <id>       move it without asking; needs the full session ID (--yes)
 claude-resume --archive <id>   archive a session so that it never expires
-claude-resume --restore <id>   move an archived session back to the session list
+claude-resume --restore <id>   move an archived or deleted session back to the session list
 claude-resume update           install the latest release
 claude-resume -v               show the installed version (--version)
 claude-resume -h               show help (--help)
@@ -52,17 +52,21 @@ You can:
 * Archive sessions
 * Delete sessions
 
-In the picker, type `/` to open the commands for the selected session: `/archive`, `/list-archives`, `/rename`, `/delete` and `/folders`. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
+In the picker, type `/` to open the commands for the selected session: `/archive`, `/rename`, `/delete`, `/folders`, `/list-archives` and `/list-deleted`. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
 
 Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
 
 ## Archiving sessions
 
-`/archive` moves a session's files into `~/.claude/claude-resume/archive`. The session leaves the list, and Claude Code's cleanup doesn't look in that folder, so it never expires. `/list-archives` shows the archived sessions: ENTER restores one and resumes it, `/restore` only restores it. A restored session gets today's date, so Claude Code's 30 days start again from the restore. Sessions that are open in a running Claude Code process are refused.
+`/archive` moves a session's files into `~/.claude-resume/archive`, outside Claude Code's folder. The session leaves the list, and Claude Code's cleanup can't reach it, so it never expires. `/list-archives` shows the archived sessions: ENTER restores one and resumes it, `/restore` only restores it. A restored session gets today's date, so Claude Code's 30 days start again from the restore. Sessions that are open in a running Claude Code process are refused.
+
+The archive and the trash are shared by every Claude Code config: a session restored while `CLAUDE_CONFIG_DIR` points elsewhere goes into that config. Archiving and deleting move files, so `~/.claude-resume` has to be on the same disk as the config folder.
 
 ## Deleting sessions
 
-A delete removes the session's transcript, its folder of subagent and tool output, and its `file-history` and `session-env` entries. It leaves `~/.claude/history.jsonl`, the prompt history behind the up arrow in Claude Code, untouched. Sessions that are open in a running Claude Code process are refused.
+A delete moves the session's transcript, its folder of subagent and tool output, and its `file-history` and `session-env` entries into `~/.claude-resume/trash`. It leaves `~/.claude/history.jsonl`, the prompt history behind the up arrow in Claude Code, untouched. Sessions that are open in a running Claude Code process are refused.
+
+Deleted sessions stay in the trash for 30 days; claude-resume deletes older ones for good each time it runs. `/list-deleted` shows them: ENTER restores one and resumes it, `/restore` only restores it, `/delete` deletes it for good, and `/empty-trash` deletes them all. A restored session gets today's date.
 
 `-y` skips the dialog and works without a terminal, so you can script it. It only accepts a full session ID, never a prefix.
 
