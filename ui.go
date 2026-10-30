@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -461,18 +463,21 @@ type command struct{ name, key, about string }
 
 var cmds = map[string][]command{
 	"": {
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/archive", "archive", "move the session to the archive, where it never expires"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
 	},
 	"archive": {
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
 	},
 	"trash": {
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
 		{"/empty-trash", "empty-trash", "delete all deleted sessions for good"},
@@ -524,6 +529,7 @@ func pick(all []*session) {
 	}
 	dir, msg, choose, mode := "", "", false, ""
 	var follow *session
+	var exported string
 	show := func(m string) {
 		mode, dir, msg, v.sel, v.top, v.query, v.cur = m, "", "", 0, 0, nil, 0
 	}
@@ -619,7 +625,11 @@ func pick(all []*session) {
 			pinKey = " · CTRL-T pin"
 		}
 		v.foot = "Type to search · / commands · ↑↓ select · ENTER " + enter + pinKey + " · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
+		if exported != "" {
+			v.foot = "Saved " + exported
+		}
 		k, i := t.run(v)
+		exported = ""
 		if k == "/" && i < 0 {
 			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" })
 		}
@@ -708,6 +718,33 @@ func pick(all []*session) {
 				delete(cache, s.path)
 				delete(loading, s.path)
 				mu.Unlock()
+			}
+			v.hide = e.hide
+		case "export":
+			s := shown[i]
+			e := &view{prompt: "export> ", items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(exportName(s)),
+				preview: func(int) []line { return v.preview(i) }, foot: "Type the path · ENTER save · ESC cancel"}
+			e.cur = len(e.query)
+			msg = ""
+			for {
+				if k, _ := t.run(e); k != "enter" {
+					break
+				}
+				path := string(e.query)
+				err := exportSession(s, path, false)
+				if errors.Is(err, fs.ErrExist) {
+					t.drain()
+					if !ask(orange)("Overwrite this file? · Y confirm · any other key edits the path", []line{{"", printable(path)}}) {
+						continue
+					}
+					err = exportSession(s, path, true)
+				}
+				if err != nil {
+					e.header = []string{"Not exported: " + printable(err.Error())}
+					continue
+				}
+				exported = printable(path)
+				break
 			}
 			v.hide = e.hide
 		case "ctrl-d":

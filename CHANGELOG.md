@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Export a selected live, archived, or deleted session's prompts and replies as Markdown with `/export` or `claude-resume --export <id> [path]` (#22). Paths are editable in the picker, existing files require overwrite confirmation, and source sessions remain unchanged.
+
 ## [0.0.9-alpha] - 2026-10-29
 
 ### Changed
