@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -25,6 +26,7 @@ const usageText = `usage: claude-resume                  pick a session, or list
        claude-resume -a               list all sessions (--all)
        claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
        claude-resume -r <id> <title>  rename a session (--rename)
+       claude-resume --export <id> [path]  save a session's prompts and replies as Markdown
        claude-resume -d [-y] <id>     move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
        claude-resume --archive <id>   archive a session so that it never expires
        claude-resume --restore <id>   move an archived or deleted session back to the session list
@@ -59,14 +61,15 @@ type session struct {
 }
 
 type record struct {
-	Type             string `json:"type"`
-	Cwd              string `json:"cwd"`
-	CustomTitle      string `json:"customTitle"`
-	AiTitle          string `json:"aiTitle"`
-	IsMeta           bool   `json:"isMeta"`
-	IsCompactSummary bool   `json:"isCompactSummary"`
-	GitBranch        string `json:"gitBranch"`
-	Message          struct {
+	Type              string `json:"type"`
+	Cwd               string `json:"cwd"`
+	CustomTitle       string `json:"customTitle"`
+	AiTitle           string `json:"aiTitle"`
+	IsMeta            bool   `json:"isMeta"`
+	IsCompactSummary  bool   `json:"isCompactSummary"`
+	IsApiErrorMessage bool   `json:"isApiErrorMessage"`
+	GitBranch         string `json:"gitBranch"`
+	Message           struct {
 		Content json.RawMessage `json:"content"`
 		Usage   struct {
 			Input       int `json:"input_tokens"`
@@ -127,6 +130,7 @@ func die(format string, a ...any) {
 func main() {
 	args := append(os.Args[1:], "")
 	arg, target, title, yes := args[0], "", "", false
+	var output string
 	switch {
 	case arg == "-h" || arg == "--help":
 		usage(0)
@@ -137,6 +141,13 @@ func main() {
 		update()
 		return
 	case arg == "" || arg == "-a" || arg == "--all":
+	case arg == "--export":
+		if target = args[1]; (len(args) != 3 && len(args) != 4) || !isHex(target) {
+			usage(1)
+		}
+		if len(args) == 4 {
+			output = args[2]
+		}
 	case arg == "-d" || arg == "--delete":
 		for _, a := range args[1 : len(args)-1] {
 			if a == "-y" || a == "--yes" {
@@ -180,13 +191,43 @@ func main() {
 	if abs, err := filepath.Abs(config); err == nil {
 		config = abs
 	}
-	if st, err := os.Stat(config); err != nil || !st.IsDir() {
+	if st, err := os.Stat(config); (err != nil || !st.IsDir()) && !(arg == "--export" && errors.Is(err, fs.ErrNotExist)) {
 		die("no sessions found in %s", shown)
 	}
 	projects = filepath.Join(config, "projects")
 	archived = filepath.Join(home, ".claude-resume", "archive")
 	trash = filepath.Join(home, ".claude-resume", "trash")
 	pinned = filepath.Join(home, ".claude-resume", "pinned")
+	if arg == "--export" {
+		all := append(scan(projects), scan(filepath.Join(archived, "projects"))...)
+		all = append(all, scan(filepath.Join(trash, "projects"))...)
+		s := mustFind(all, target)
+		if output == "" {
+			output = exportName(s)
+		}
+		output, err := exportPath(s, output)
+		if err != nil {
+			die("not exported: %s", printable(err.Error()))
+		}
+		err = exportSession(s, output, false)
+		if errors.Is(err, fs.ErrExist) {
+			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+				die("overwriting needs a terminal to confirm; choose another export path")
+			}
+			t := openTTY()
+			confirmed := t.confirmDialog("Export session", []line{{"1", "Overwrite this export?"}, {}, {"", printable(output)}})
+			t.close()
+			if !confirmed {
+				die("cancelled, nothing was exported")
+			}
+			err = exportSession(s, output, true)
+		}
+		if err != nil {
+			die("not exported: %s", printable(err.Error()))
+		}
+		fmt.Println("Saved " + printable(output))
+		return
+	}
 	purge(scan(filepath.Join(trash, "projects")), time.Now().AddDate(0, 0, -30))
 	all := scan(projects)
 	if keep(all) {
@@ -282,17 +323,20 @@ func scan(projects string) []*session {
 	return list
 }
 
-func eachLine(path string, want func(n int, head []byte) bool, fn func(n int, line []byte) bool) {
+func eachLine(path string, want func(n int, head []byte) bool, fn func(n int, line []byte) bool) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
 	r := bufio.NewReaderSize(f, 64<<10)
 	for n := 0; ; n++ {
 		chunk, err := r.ReadSlice('\n')
 		if len(chunk) == 0 && err != nil {
-			return
+			if err == io.EOF {
+				return nil
+			}
+			return err
 		}
 		keep := want(n, chunk)
 		line := chunk
@@ -310,10 +354,13 @@ func eachLine(path string, want func(n int, head []byte) bool, fn func(n int, li
 			line = full
 		}
 		if keep && !fn(n, line) {
-			return
+			return nil
 		}
 		if err != nil {
-			return
+			if err == io.EOF {
+				return nil
+			}
+			return err
 		}
 	}
 }

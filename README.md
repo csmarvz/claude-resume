@@ -33,6 +33,7 @@ claude-resume                  pick a session, or list the last 10 outside a ter
 claude-resume -a               list all sessions (--all)
 claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
 claude-resume -r <id> <title>  rename a session (--rename)
+claude-resume --export <id> [path]  save a session's prompts and replies as Markdown
 claude-resume -d <id>          move a session to the trash after a confirmation (--delete)
 claude-resume -d -y <id>       move it without asking; needs the full session ID (--yes)
 claude-resume --archive <id>   archive a session so that it never expires
@@ -51,13 +52,22 @@ You can:
 * Preview sessions
 * Search sessions
 * Rename sessions
+* Export sessions as Markdown
 * Pin sessions
 * Archive sessions
 * Delete sessions
 
-In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/delete`, `/folders`, `/list-archives`, `/list-deleted` and `/exit`. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
+In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/export`, `/delete`, `/folders`, `/list-archives`, `/list-deleted` and `/exit`. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
 
 Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
+
+## Exporting sessions
+
+`/export` saves the selected live, archived, or deleted session as Markdown without opening or changing it. Edit the suggested `./<title>--<id>.md` path, relative to where claude-resume was started, then press ENTER to save or ESC to cancel. An existing file requires Y to overwrite; any other key returns to the path. The picker keeps its search and selection, and shows the saved path in its footer.
+
+`claude-resume --export <id> [path]` does the same from the command line; omit the path to use the suggested filename. Both entry points expand `~` to your home directory and accept a folder to save the suggested filename inside it. Overwriting requires an interactive terminal. Missing or ambiguous IDs are refused.
+
+Exports contain user prompts and Claude's text replies in order, without shortening or removing repeated messages. Consecutive text from the same role shares a heading. Tool calls/results, thinking, images and internal records (including task notifications, slash-command/skill records, and shell-command records) are left out. Malformed transcript lines are skipped. Running sessions can be exported; the export reads through one open transcript handle and can include messages appended while it is reading. On Unix, exports use owner-only read/write permissions (0600), including when replacing an existing file, because transcripts can contain private prompts.
 
 ## Pinning sessions
 

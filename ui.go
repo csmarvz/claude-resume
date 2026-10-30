@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -463,17 +465,20 @@ var cmds = map[string][]command{
 	"": {
 		{"/archive", "archive", "move the session to the archive, where it never expires"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
 	},
 	"archive": {
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
 	},
 	"trash": {
 		{"/restore", "restore", "move the session back to the session list"},
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
 		{"/empty-trash", "empty-trash", "delete all deleted sessions for good"},
 		{"/folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
@@ -524,6 +529,7 @@ func pick(all []*session) {
 	}
 	dir, msg, choose, mode := "", "", false, ""
 	var follow *session
+	var exported string
 	show := func(m string) {
 		mode, dir, msg, v.sel, v.top, v.query, v.cur = m, "", "", 0, 0, nil, 0
 	}
@@ -619,7 +625,11 @@ func pick(all []*session) {
 			pinKey = " · CTRL-T pin"
 		}
 		v.foot = "Type to search · / commands · ↑↓ select · ENTER " + enter + pinKey + " · CTRL-R rename · CTRL-D delete · CTRL-SPACE preview · CTRL-A folders · ESC " + esc
+		if exported != "" {
+			v.foot = "Saved " + exported
+		}
 		k, i := t.run(v)
+		exported = ""
 		if k == "/" && i < 0 {
 			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" })
 		}
@@ -708,6 +718,37 @@ func pick(all []*session) {
 				delete(cache, s.path)
 				delete(loading, s.path)
 				mu.Unlock()
+			}
+			v.hide = e.hide
+		case "export":
+			s := shown[i]
+			e := &view{prompt: "export> ", items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(exportName(s)),
+				preview: func(int) []line { return v.preview(i) }, foot: "Type the path · ENTER save · ESC cancel"}
+			e.cur = len(e.query)
+			msg = ""
+			for {
+				if k, _ := t.run(e); k != "enter" {
+					break
+				}
+				path, err := exportPath(s, string(e.query))
+				if err != nil {
+					e.header = []string{"Not exported: " + printable(err.Error())}
+					continue
+				}
+				err = exportSession(s, path, false)
+				if errors.Is(err, fs.ErrExist) {
+					t.drain()
+					if !ask(orange)("Overwrite this file? · Y confirm · any other key edits the path", []line{{"", printable(path)}}) {
+						continue
+					}
+					err = exportSession(s, path, true)
+				}
+				if err != nil {
+					e.header = []string{"Not exported: " + printable(err.Error())}
+					continue
+				}
+				exported = printable(path)
+				break
 			}
 			v.hide = e.hide
 		case "ctrl-d":
@@ -802,11 +843,15 @@ func (t *tty) command(v *view, cmds []command) string {
 }
 
 func (t *tty) confirm(_ string, lines []line) bool {
+	return t.confirmDialog("Delete session", lines)
+}
+
+func (t *tty) confirmDialog(title string, lines []line) bool {
 	t.drain()
 	sel, last, redraw := 0, time.Now(), true
 	for {
 		if redraw || t.resized() {
-			t.dialog(lines, sel)
+			t.dialog(title, lines, sel)
 		}
 		k := t.read()
 		redraw = k != ""
@@ -829,7 +874,7 @@ func (t *tty) confirm(_ string, lines []line) bool {
 	}
 }
 
-func (t *tty) dialog(lines []line, sel int) {
+func (t *tty) dialog(title string, lines []line, sel int) {
 	cols, rows := t.size()
 	t.w, t.h = cols, rows
 	w := min(cols-4, 96)
@@ -867,7 +912,7 @@ func (t *tty) dialog(lines []line, sel int) {
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m \x1b[%sm%s\x1b[0m\x1b[%d;%dH\x1b[31m│\x1b[0m", r, left, style, s, r, left+w-1)
 		r++
 	}
-	label, hint := " Delete session ", " ←→ select · ENTER choose · ESC cancel "
+	label, hint := " "+title+" ", " ←→ select · ENTER choose · ESC cancel "
 	if width(label) > w-4 {
 		label = ""
 	}
