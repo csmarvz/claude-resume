@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -34,6 +36,11 @@ func TestExportMarkdown(t *testing.T) {
 		exportMessage("user", "<local-command-stdout>Compacted</local-command-stdout>"),
 		exportMessage("user", "<local-command-caveat>Local command</local-command-caveat>"),
 		exportMessage("user", "<command-name>/compact</command-name>"),
+		exportMessage("user", "<command-message>unslop:unslop</command-message>\n<command-name>/unslop</command-name>"),
+		exportMessage("user", "<task-notification>background work completed</task-notification>"),
+		exportMessage("user", "<bash-input>ls</bash-input>"),
+		exportMessage("user", "<bash-stdout>files</bash-stdout>"),
+		exportMessage("user", "<bash-stderr>failed</bash-stderr>"),
 		exportMessage("user", "<session-start-hook>hook output</session-start-hook>"),
 		exportMessage("user", "<tick>scheduler output</tick>"),
 		exportMessage("user", "<goal>background task</goal>"),
@@ -52,7 +59,7 @@ func TestExportMarkdown(t *testing.T) {
 	if err := exportMarkdown(s, &output); err != nil {
 		t.Fatal(err)
 	}
-	want := "## User\n\n<real-user-text>\n```go\nx := 1\n```\n\n## Claude\n\n" + long + "\n\n## User\n\nagain\n\n## User\n\nagain\n\n## Claude\n\nAPI Error: an explanation written by Claude\n\n## Claude\n\nfinal reply\n\n"
+	want := "## User\n\n<real-user-text>\n```go\nx := 1\n```\n\n## Claude\n\n" + long + "\n\n## User\n\nagain\n\nagain\n\n## Claude\n\nAPI Error: an explanation written by Claude\n\nfinal reply\n\n"
 	if output.String() != want {
 		t.Fatalf("export changed conversation content: got %d bytes, want %d", output.Len(), len(want))
 	}
@@ -72,6 +79,38 @@ func TestExportName(t *testing.T) {
 		base := filepath.Base(path)
 		if filepath.Dir(path) != "." || !strings.HasSuffix(base, "--"+exportID+".md") || strings.ContainsAny(base, `<>:"/\|?*`) || len(base) > 255 || !utf8.ValidString(base) {
 			t.Errorf("unsafe export filename for %q: %q", title, path)
+		}
+	}
+}
+
+func TestExportPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	s := &session{loaded: true, title: "session title", id: exportID}
+	file := filepath.Join(home, "existing.md")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ input, want string }{
+		{"~/export.md", filepath.Join(home, "export.md")},
+		{`~\export.md`, filepath.Join(home, "export.md")},
+		{"~", filepath.Join(home, filepath.Base(exportName(s)))},
+		{home, filepath.Join(home, filepath.Base(exportName(s)))},
+		{file, file},
+	} {
+		if got, err := exportPath(s, c.input); err != nil || got != c.want {
+			t.Errorf("exportPath(%q) = %q, %v; want %q", c.input, got, err, c.want)
+		}
+	}
+	for _, c := range []struct{ input, message string }{
+		{"", "enter an export path"},
+		{filepath.Join(home, "nodir", "x.md"), `folder "` + filepath.Join(home, "nodir") + `" does not exist`},
+		{filepath.Join(file, "x.md"), "is not a folder"},
+	} {
+		_, err := exportPath(s, c.input)
+		if err == nil || !strings.Contains(err.Error(), c.message) || strings.Contains(err.Error(), ".claude-resume-export-") {
+			t.Errorf("unhelpful error for %q: %v", c.input, err)
 		}
 	}
 }
@@ -106,9 +145,14 @@ func TestExportSession(t *testing.T) {
 	if got, _ := os.ReadFile(path); !bytes.Equal(got, want) {
 		t.Fatalf("overwrite did not save Markdown: %q", got)
 	}
+	if st, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
+		t.Fatalf("export must retain private file permissions: %v, %v", st, err)
+	}
 	for _, dest := range []string{s.path, dir, filepath.Join(dir, "missing", "export.md")} {
 		if err := exportSession(s, dest, true); err == nil {
 			t.Errorf("accepted invalid destination %q", dest)
+		} else if strings.Contains(err.Error(), ".claude-resume-export-") {
+			t.Errorf("temporary path leaked into save error: %v", err)
 		}
 	}
 	alias := filepath.Join(dir, "alias.md")
@@ -219,6 +263,23 @@ func TestExportCLI(t *testing.T) {
 			if out, err := run("--export", exportID, path); err == nil || !strings.Contains(out, "needs a terminal") {
 				t.Fatalf("unattended overwrite: %s, %v", out, err)
 			}
+			folder := filepath.Join(dir, "output folder")
+			if err := os.Mkdir(folder, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, destination := range []string{folder, "~/home-export.md"} {
+				if out, err := run("--export", exportID, destination); err != nil {
+					t.Fatalf("friendly destination %q: %s, %v", destination, out, err)
+				}
+			}
+			for _, saved := range []string{filepath.Join(folder, filepath.Base(def)), filepath.Join(dir, "home-export.md")} {
+				if b, err := os.ReadFile(saved); err != nil || !strings.Contains(string(b), "## Claude\n\nworld") {
+					t.Fatalf("resolved destination %q: %q, %v", saved, b, err)
+				}
+			}
+			if out, err := run("--export", exportID, filepath.Join(dir, "nodir", "x.md")); err == nil || !strings.Contains(out, "does not exist") || strings.Contains(out, ".claude-resume-export-") {
+				t.Fatalf("missing-folder error: %s, %v", out, err)
+			}
 			if out, err := run("--export", "abcdef"); err == nil || !strings.Contains(out, "no session") {
 				t.Fatalf("missing ID: %s, %v", out, err)
 			}
@@ -236,5 +297,37 @@ func TestExportCLI(t *testing.T) {
 				t.Fatalf("CLI changed source: %q, %v", b, err)
 			}
 		})
+	}
+}
+
+type exportConfirmOutput struct {
+	bytes.Buffer
+	keys  chan []byte
+	input string
+}
+
+func (w *exportConfirmOutput) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if w.input != "" {
+		w.keys <- []byte(w.input)
+		w.input = ""
+	}
+	return n, err
+}
+
+func TestExportSharedConfirmation(t *testing.T) {
+	for _, c := range []struct {
+		input string
+		want  bool
+	}{{"Y", true}, {"n", false}, {"\x1b", false}, {"\r", false}, {"\x1b[C\r", true}} {
+		keys := make(chan []byte, 1)
+		out := &exportConfirmOutput{keys: keys, input: c.input}
+		terminal := &tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}
+		if got := terminal.confirm("Overwrite this export?", []line{{"", "export.md"}}); got != c.want {
+			t.Errorf("confirmation %q = %v, want %v", c.input, got, c.want)
+		}
+		if !strings.Contains(out.String(), "Overwrite this export?") || strings.Contains(out.String(), "Delete session") {
+			t.Fatal("shared confirmation showed the wrong action")
+		}
 	}
 }

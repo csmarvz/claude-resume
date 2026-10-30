@@ -205,20 +205,19 @@ func main() {
 		if output == "" {
 			output = exportName(s)
 		}
-		err := exportSession(s, output, false)
+		output, err := exportPath(s, output)
+		if err != nil {
+			die("not exported: %s", printable(err.Error()))
+		}
+		err = exportSession(s, output, false)
 		if errors.Is(err, fs.ErrExist) {
 			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 				die("overwriting needs a terminal to confirm; choose another export path")
 			}
 			t := openTTY()
-			t.out.WriteString("\x1b[2J\x1b[HOverwrite " + printable(output) + "? · Y confirm · any other key cancels")
-			t.out.Flush()
-			var k string
-			for k == "" || k == "wake" {
-				k = t.read()
-			}
+			confirmed := t.confirm("Overwrite this export?", []line{{"", printable(output)}})
 			t.close()
-			if k != "y" && k != "Y" {
+			if !confirmed {
 				die("cancelled, nothing was exported")
 			}
 			err = exportSession(s, output, true)

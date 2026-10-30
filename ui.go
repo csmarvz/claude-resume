@@ -463,22 +463,22 @@ type command struct{ name, key, about string }
 
 var cmds = map[string][]command{
 	"": {
-		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/archive", "archive", "move the session to the archive, where it never expires"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
 	},
 	"archive": {
-		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
 		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
 	},
 	"trash": {
-		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/restore", "restore", "move the session back to the session list"},
+		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
 		{"/empty-trash", "empty-trash", "delete all deleted sessions for good"},
 		{"/folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
@@ -730,8 +730,12 @@ func pick(all []*session) {
 				if k, _ := t.run(e); k != "enter" {
 					break
 				}
-				path := string(e.query)
-				err := exportSession(s, path, false)
+				path, err := exportPath(s, string(e.query))
+				if err != nil {
+					e.header = []string{"Not exported: " + printable(err.Error())}
+					continue
+				}
+				err = exportSession(s, path, false)
 				if errors.Is(err, fs.ErrExist) {
 					t.drain()
 					if !ask(orange)("Overwrite this file? · Y confirm · any other key edits the path", []line{{"", printable(path)}}) {
@@ -838,8 +842,9 @@ func (t *tty) command(v *view, cmds []command) string {
 	}
 }
 
-func (t *tty) confirm(_ string, lines []line) bool {
+func (t *tty) confirm(question string, lines []line) bool {
 	t.drain()
+	lines = append([]line{{"1", printable(question)}, {}}, lines...)
 	sel, last, redraw := 0, time.Now(), true
 	for {
 		if redraw || t.resized() {
@@ -859,7 +864,9 @@ func (t *tty) confirm(_ string, lines []line) bool {
 			sel = 1
 		case "enter":
 			return sel == 1
-		case "esc", "q":
+		case "y", "Y":
+			return true
+		case "esc", "q", "n", "N":
 			return false
 		}
 		last = time.Now()
@@ -904,7 +911,7 @@ func (t *tty) dialog(lines []line, sel int) {
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m \x1b[%sm%s\x1b[0m\x1b[%d;%dH\x1b[31m│\x1b[0m", r, left, style, s, r, left+w-1)
 		r++
 	}
-	label, hint := " Delete session ", " ←→ select · ENTER choose · ESC cancel "
+	label, hint := " Confirm action ", " Y/N · ←→ select · ENTER choose · ESC cancel "
 	if width(label) > w-4 {
 		label = ""
 	}
