@@ -81,6 +81,10 @@ func TestExportName(t *testing.T) {
 			t.Errorf("unsafe export filename for %q: %q", title, path)
 		}
 	}
+	s := &session{loaded: true, title: "Kids bike search on Ricardo", id: exportID}
+	if got, want := exportName(s), "."+string(filepath.Separator)+"Kids-bike-search-on-Ricardo--"+exportID+".md"; got != want {
+		t.Errorf("suggested filename = %q, want %q", got, want)
+	}
 }
 
 func TestExportPath(t *testing.T) {
@@ -237,7 +241,7 @@ func TestExportCLI(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			content := exportMessage("user", "hello") + "\n" + exportMessage("assistant", "world")
+			content := exportMessage("user", "hello there") + "\n" + exportMessage("assistant", "world")
 			if err := os.WriteFile(source, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +256,7 @@ func TestExportCLI(t *testing.T) {
 			if err != nil || !strings.Contains(out, "Saved ") {
 				t.Fatalf("default export: %s, %v", out, err)
 			}
-			def := filepath.Join(dir, "hello--"+exportID+".md")
+			def := filepath.Join(dir, "hello-there--"+exportID+".md")
 			if b, err := os.ReadFile(def); err != nil || !strings.Contains(string(b), "## Claude\n\nworld") {
 				t.Fatalf("default destination: %q, %v", b, err)
 			}

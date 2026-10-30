@@ -36,6 +36,7 @@ func exportName(s *session) string {
 	if base == "" {
 		base = "session"
 	}
+	base = strings.ReplaceAll(base, " ", "-")
 	return "." + string(filepath.Separator) + base + "--" + s.id + ".md"
 }
 
