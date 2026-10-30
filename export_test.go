@@ -319,15 +319,29 @@ func TestExportSharedConfirmation(t *testing.T) {
 	for _, c := range []struct {
 		input string
 		want  bool
-	}{{"Y", true}, {"n", false}, {"\x1b", false}, {"\r", false}, {"\x1b[C\r", true}} {
-		keys := make(chan []byte, 1)
-		out := &exportConfirmOutput{keys: keys, input: c.input}
-		terminal := &tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}
-		if got := terminal.confirm("Overwrite this export?", []line{{"", "export.md"}}); got != c.want {
-			t.Errorf("confirmation %q = %v, want %v", c.input, got, c.want)
-		}
-		if !strings.Contains(out.String(), "Overwrite this export?") || strings.Contains(out.String(), "Delete session") {
-			t.Fatal("shared confirmation showed the wrong action")
+	}{{"Y\r", false}, {"n\x1b[C\r", true}, {"x\x1b[C\r", true}, {"\x1b", false}, {"q", false}, {"\r", false}, {"\x1b[C\r", true}} {
+		for _, title := range []string{"Delete session", "Export session"} {
+			keys := make(chan []byte, 1)
+			out := &exportConfirmOutput{keys: keys, input: c.input}
+			terminal := &tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}
+			var got bool
+			if title == "Delete session" {
+				got = terminal.confirm("Y confirm · any other key cancels", []line{{"", "session.jsonl"}})
+				if strings.Contains(out.String(), "Y confirm") || strings.Contains(out.String(), "any other key cancels") {
+					t.Fatal("delete dialog displayed the picker-only prompt")
+				}
+			} else {
+				got = terminal.confirmDialog(title, []line{{"1", "Overwrite this export?"}, {}, {"", "export.md"}})
+				if !strings.Contains(out.String(), "Overwrite this export?") || strings.Contains(out.String(), "Delete session") {
+					t.Fatal("export dialog showed the wrong action")
+				}
+			}
+			if got != c.want {
+				t.Errorf("%s confirmation %q = %v, want %v", title, c.input, got, c.want)
+			}
+			if !strings.Contains(out.String(), title) || strings.Contains(out.String(), "Y/N") {
+				t.Fatal("dialog title or controls changed")
+			}
 		}
 	}
 }

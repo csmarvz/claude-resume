@@ -842,13 +842,16 @@ func (t *tty) command(v *view, cmds []command) string {
 	}
 }
 
-func (t *tty) confirm(question string, lines []line) bool {
+func (t *tty) confirm(_ string, lines []line) bool {
+	return t.confirmDialog("Delete session", lines)
+}
+
+func (t *tty) confirmDialog(title string, lines []line) bool {
 	t.drain()
-	lines = append([]line{{"1", printable(question)}, {}}, lines...)
 	sel, last, redraw := 0, time.Now(), true
 	for {
 		if redraw || t.resized() {
-			t.dialog(lines, sel)
+			t.dialog(title, lines, sel)
 		}
 		k := t.read()
 		redraw = k != ""
@@ -864,16 +867,14 @@ func (t *tty) confirm(question string, lines []line) bool {
 			sel = 1
 		case "enter":
 			return sel == 1
-		case "y", "Y":
-			return true
-		case "esc", "q", "n", "N":
+		case "esc", "q":
 			return false
 		}
 		last = time.Now()
 	}
 }
 
-func (t *tty) dialog(lines []line, sel int) {
+func (t *tty) dialog(title string, lines []line, sel int) {
 	cols, rows := t.size()
 	t.w, t.h = cols, rows
 	w := min(cols-4, 96)
@@ -911,7 +912,7 @@ func (t *tty) dialog(lines []line, sel int) {
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[31m│\x1b[0m \x1b[%sm%s\x1b[0m\x1b[%d;%dH\x1b[31m│\x1b[0m", r, left, style, s, r, left+w-1)
 		r++
 	}
-	label, hint := " Confirm action ", " Y/N · ←→ select · ENTER choose · ESC cancel "
+	label, hint := " "+title+" ", " ←→ select · ENTER choose · ESC cancel "
 	if width(label) > w-4 {
 		label = ""
 	}

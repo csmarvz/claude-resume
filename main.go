@@ -215,7 +215,7 @@ func main() {
 				die("overwriting needs a terminal to confirm; choose another export path")
 			}
 			t := openTTY()
-			confirmed := t.confirm("Overwrite this export?", []line{{"", printable(output)}})
+			confirmed := t.confirmDialog("Export session", []line{{"1", "Overwrite this export?"}, {}, {"", printable(output)}})
 			t.close()
 			if !confirmed {
 				die("cancelled, nothing was exported")
