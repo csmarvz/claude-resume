@@ -171,6 +171,7 @@ type view struct {
 	preview func(i int) []line
 	keys    map[string]bool
 	edit    bool
+	fixed   bool
 	warn    string
 
 	query     []rune
@@ -184,7 +185,7 @@ type view struct {
 
 func (v *view) filter() {
 	terms := strings.Fields(string(v.query))
-	if v.edit {
+	if v.edit || v.fixed {
 		terms = nil
 	}
 	v.shown, v.pos = v.shown[:0], v.pos[:0]
@@ -205,6 +206,9 @@ func (t *tty) run(v *view) (string, int) {
 			t.draw(v)
 		}
 		k := t.read()
+		if v.fixed && !slices.Contains([]string{"", "wake", "esc", "enter", "up", "down", "pgup", "pgdn", "shift-up", "shift-down", "ctrl-space"}, k) {
+			continue
+		}
 		redraw = k != ""
 		n := len(v.shown)
 		edited := false

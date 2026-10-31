@@ -131,11 +131,6 @@ func TestBackupOverwrite(t *testing.T) {
 			if action == "trash-collision" {
 				backupTestSession(t, "trash", "project", exportID, "older recovery")
 			}
-			if action == "install-failure" {
-				if err := os.RemoveAll(filepath.Join(config, "session-env")); err != nil {
-					t.Fatal(err)
-				}
-			}
 			called := false
 			msg, err := backupRestore(zipPath, func(lines []line) string {
 				called = true
@@ -143,7 +138,14 @@ func TestBackupOverwrite(t *testing.T) {
 					t.Fatal("comparison missing")
 				}
 				if action == "install-failure" {
-					backupTestWrite(t, filepath.Join(config, "session-env"), "obstacle")
+					// Lose staged input after validation to force an installation-time I/O failure.
+					stages, err := filepath.Glob(filepath.Join(home, ".claude-resume", "restore-*"))
+					if err != nil || len(stages) != 1 {
+						t.Fatal(stages, err)
+					}
+					if err := os.Remove(parts(filepath.Join(stages[0], "live"), "project", exportID)[0]); err != nil {
+						t.Fatal(err)
+					}
 					return "overwrite"
 				}
 				return action
@@ -340,6 +342,11 @@ func TestBackupPublicationAndAliases(t *testing.T) {
 
 func TestBackupRunningPolicy(t *testing.T) {
 	dir := backupTestStores(t)
+	if runtime.GOOS != "windows" {
+		if _, err := exec.Command("ps", "-ww", "-p", fmt.Sprint(os.Getpid()), "-o", "args=").Output(); err != nil {
+			t.Skip("ps does not support the process lookup used by isClaude:", err)
+		}
+	}
 	s := backupTestSession(t, "live", "p", exportID, "running")
 	// The subprocess name includes claude on Unix; Windows checks the current PID's existence.
 	cmd := exec.Command(os.Args[0], "-test.run=^TestBackupRunningProcess$", "--", "claude")
@@ -435,6 +442,118 @@ func TestBackupPickerPaths(t *testing.T) {
 			msg := terminal.backupDialog(action, selected)
 			if !strings.HasPrefix(msg, "Saved ") && !strings.HasPrefix(msg, "Restored 1") {
 				t.Fatal(msg)
+			}
+		})
+	}
+}
+
+func TestBackupChooseIgnoresTyping(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"unmatched query\r", "skip"},
+		{"unmatched query\x1b[B\r", "overwrite"},
+		{"unmatched query\x1b[B\x1b[B\r", "cancel"},
+	} {
+		keys := make(chan []byte, 1)
+		out := &exportConfirmOutput{keys: keys, input: tc.input}
+		terminal := &tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}
+		if got := backupChoose(terminal, []line{{"", "comparison"}}); got != tc.want {
+			t.Fatalf("got %q, want %q", got, tc.want)
+		}
+	}
+}
+
+func TestBackupTrustedSymlinkRoots(t *testing.T) {
+	dir := backupTestStores(t)
+	s := backupTestSession(t, "live", "p", exportID, "raw")
+	realConfig := config
+	alias := filepath.Join(dir, "config-link")
+	if err := os.Symlink(config, alias); err != nil {
+		t.Skip("directory symlinks unavailable:", err)
+	}
+	config, projects = alias, filepath.Join(alias, "projects")
+	s.path = parts(config, "p", exportID)[0]
+	home = filepath.Join(dir, "home-link")
+	if err := os.Symlink(dir, home); err != nil {
+		t.Fatal(err)
+	}
+	archived, trash, pinned = filepath.Join(home, ".claude-resume", "archive"), filepath.Join(home, ".claude-resume", "trash"), filepath.Join(home, ".claude-resume", "pinned")
+	if _, err := link(exportID, "p"); err != nil {
+		t.Fatal("pin through linked roots:", err)
+	}
+	if err := os.Remove(s.path); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := backupPool()
+	if err != nil || len(pool) != 1 || !pool[0].pinned {
+		t.Fatal("pin recovery through linked roots:", pool, err)
+	}
+	output := filepath.Join(dir, "output-link")
+	if err := os.Symlink(dir, output); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(output, "backup.zip")
+	if err := backupWrite(pool, file, false); err != nil {
+		t.Fatal("backup through linked output parent:", err)
+	}
+	if err := backupWrite(pool, filepath.Join(realConfig, "alias.zip"), false); err == nil {
+		t.Fatal("physical output alias into config accepted")
+	}
+	inside := filepath.Join(parts(realConfig, "p", exportID)[1], "inside.zip")
+	backupTestWrite(t, inside, backupTestRead(t, file))
+	if _, err := backupRestore(inside, func([]line) string { t.Fatal("unsafe restore prompted"); return "overwrite" }); err == nil || !strings.Contains(err.Error(), "inside a restore destination") {
+		t.Fatal("physical ZIP alias inside restore destination accepted:", err)
+	}
+	_, stage, err := backupStage(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(stage) != filepath.Join(home, ".claude-resume") {
+		t.Fatal("restore staged outside application storage:", stage)
+	}
+	if err := os.RemoveAll(stage); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(realConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(realConfig, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(pinned); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := backupRestore(file, func([]line) string { return "cancel" })
+	if err != nil || !strings.Contains(msg, "Restored 1") || backupTestRead(t, s.path) != "raw" {
+		t.Fatal("restore through linked roots:", msg, err)
+	}
+}
+
+func TestBackupRestoreTracksTrashChanges(t *testing.T) {
+	for _, trashFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(trashFirst), func(t *testing.T) {
+			dir := backupTestStores(t)
+			live := backupTestSession(t, "live", "p", exportID, "new live")
+			deleted := backupTestSession(t, "trash", "q", exportID, "new trash")
+			list := []*session{live, deleted}
+			if trashFirst {
+				list = []*session{deleted, live}
+			}
+			file := filepath.Join(dir, "backup.zip")
+			if err := backupWrite(list, file, false); err != nil {
+				t.Fatal(err)
+			}
+			backupTestStores(t)
+			original := backupTestSession(t, "live", "p", exportID, "original")
+			msg, err := backupRestore(file, func([]line) string { return "overwrite" })
+			if err != nil || !strings.Contains(msg, "Restored 1 session(s); skipped 1") {
+				t.Fatal(msg, err)
+			}
+			if trashFirst {
+				if backupTestRead(t, original.path) != "original" || backupTestRead(t, parts(trash, "q", exportID)[2]+"/checkpoint") != "new trash" {
+					t.Fatal("trash install did not protect later overwrite")
+				}
+			} else if backupTestRead(t, parts(trash, "p", exportID)[2]+"/checkpoint") != "original" {
+				t.Fatal("later trash install changed preserved data")
 			}
 		})
 	}

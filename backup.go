@@ -40,13 +40,21 @@ func backupName() string {
 	return "./claude-resume-backup-" + time.Now().Format("20060102-150405") + ".zip"
 }
 
-// Reject links in ancestors too: a safe ZIP name must not escape through an existing directory link.
-func backupNoLinks(p string) error {
+// Store roots are trusted; session data below them must not redirect through links.
+func backupNoLinks(p, store string) error {
 	p, err := filepath.Abs(p)
 	if err != nil {
 		return err
 	}
-	for {
+	store, err = filepath.Abs(store)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(store, p)
+	if err != nil || rel != "." && !filepath.IsLocal(rel) {
+		return fmt.Errorf("path is outside its store: %s", p)
+	}
+	for rel != "." {
 		st, err := os.Lstat(p)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
@@ -54,12 +62,30 @@ func backupNoLinks(p string) error {
 		if err == nil && st.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("links are not supported: %s", p)
 		}
-		parent := filepath.Dir(p)
-		if parent == p {
-			return nil
-		}
-		p = parent
+		p = filepath.Dir(p)
+		rel = filepath.Dir(rel)
 	}
+	return nil
+}
+
+// Resolve existing ancestors even when a store or output file does not exist yet.
+func backupResolved(p string) (string, error) {
+	p, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(p)
+	if err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return resolved, err
+	}
+	if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("cannot resolve path: %s", p)
+	}
+	if filepath.Dir(p) == p {
+		return "", err
+	}
+	parent, err := backupResolved(filepath.Dir(p))
+	return filepath.Join(parent, filepath.Base(p)), err
 }
 
 func backupPath(p string) (string, error) { return outputPath(p, filepath.Base(backupName())) }
@@ -83,11 +109,8 @@ func backupPool() ([]*session, error) {
 }
 
 func backupScan(store string) ([]*session, error) {
-	if err := backupNoLinks(store); err != nil {
-		return nil, err
-	}
 	base := filepath.Join(store, "projects")
-	if err := backupNoLinks(base); err != nil {
+	if err := backupNoLinks(base, store); err != nil {
 		return nil, err
 	}
 	st, err := os.Stat(base)
@@ -167,20 +190,20 @@ func backupWrite(list []*session, destination string, overwrite bool) (err error
 	if _, err := backupLiveWarning(list); err != nil {
 		return err
 	}
-	if err := backupNoLinks(destination); err != nil {
+	if err := backupNoLinks(destination, filepath.Dir(destination)); err != nil {
 		return err
 	}
-	abs, err := filepath.Abs(destination)
+	abs, err := backupResolved(destination)
 	if err != nil {
 		return err
 	}
 	for _, store := range append([]string{pinned}, config, archived, trash) {
-		r, err := filepath.Abs(store)
+		r, err := backupResolved(store)
 		if err != nil {
 			return err
 		}
 		rel, err := filepath.Rel(r, abs)
-		if err == nil && filepath.IsLocal(rel) {
+		if err == nil && (rel == "." || filepath.IsLocal(rel)) {
 			return errors.New("choose a backup destination outside the session stores")
 		}
 	}
@@ -220,7 +243,7 @@ func backupWrite(list []*session, destination string, overwrite bool) (err error
 			return errors.New("session selected more than once")
 		}
 		seenSessions[sessionKey] = true
-		if err := backupNoLinks(s.path); err != nil {
+		if err := backupNoLinks(s.path, root(s)); err != nil {
 			return err
 		}
 		st, err := os.Stat(s.path)
@@ -232,7 +255,7 @@ func backupWrite(list []*session, destination string, overwrite bool) (err error
 		}
 		m.Sessions = append(m.Sessions, backupSession{category, folder(s), s.id, s.pinned, st.ModTime()})
 		for partIndex, top := range parts(root(s), folder(s), s.id) {
-			if err := backupNoLinks(top); err != nil {
+			if err := backupNoLinks(top, root(s)); err != nil {
 				return err
 			}
 			if _, err := os.Lstat(top); errors.Is(err, fs.ErrNotExist) && partIndex != 0 {
@@ -304,7 +327,7 @@ func backupWrite(list []*session, destination string, overwrite bool) (err error
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := backupNoLinks(destination); err != nil {
+	if err := backupNoLinks(destination, filepath.Dir(destination)); err != nil {
 		return err
 	}
 	if previous != nil {
@@ -422,7 +445,11 @@ func backupStage(file string) (backupManifest, string, error) {
 	if len(wanted) != len(entries) {
 		return m, "", errors.New("ZIP contains undeclared data")
 	}
-	dir, err := os.MkdirTemp("", "claude-resume-restore-*")
+	stagingRoot := filepath.Join(home, ".claude-resume")
+	if err := os.MkdirAll(stagingRoot, 0o700); err != nil {
+		return m, "", err
+	}
+	dir, err := os.MkdirTemp(stagingRoot, "restore-*")
 	if err != nil {
 		return m, "", err
 	}
@@ -510,7 +537,11 @@ func backupSummary(s *session) ([]line, error) {
 
 // choose returns overwrite, skip, or cancel; all decisions are collected before installation.
 func backupRestore(file string, choose func([]line) string) (string, error) {
-	if err := backupNoLinks(file); err != nil {
+	if err := backupNoLinks(file, filepath.Dir(file)); err != nil {
+		return "", err
+	}
+	zipPath, err := backupResolved(file)
+	if err != nil {
 		return "", err
 	}
 	m, stage, err := backupStage(file)
@@ -527,25 +558,42 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 	var skipped []string
 	trashClaims := map[string]bool{}
 	stores := backupStores()
+	snapshot := func() (map[string]map[string][]*session, error) {
+		inventory := map[string]map[string][]*session{}
+		for _, store := range []string{config, archived, trash, pinned} {
+			list, err := backupScan(store)
+			if err != nil {
+				return nil, err
+			}
+			inventory[store] = map[string][]*session{}
+			for _, s := range list {
+				inventory[store][s.id] = append(inventory[store][s.id], s)
+			}
+		}
+		return inventory, nil
+	}
+	inventory, err := snapshot()
+	if err != nil {
+		return "", err
+	}
+	incomingProjects := map[string]map[string]bool{}
+	for _, s := range m.Sessions {
+		key := s.Category + "/" + s.ID
+		if incomingProjects[key] == nil {
+			incomingProjects[key] = map[string]bool{}
+		}
+		incomingProjects[key][s.Project] = true
+	}
 	for _, s := range m.Sessions {
 		r := stores[s.Category]
 		skip := ""
 		projectsForID := map[string]bool{s.Project: true}
-		for _, other := range m.Sessions {
-			if other.Category == s.Category && other.ID == s.ID {
-				projectsForID[other.Project] = true
-			}
+		for project := range incomingProjects[s.Category+"/"+s.ID] {
+			projectsForID[project] = true
 		}
-		existing, err := backupScan(r)
-		if err != nil {
-			return "", err
-		}
+		existing := slices.Clone(inventory[r][s.ID])
 		if s.Category == "live" {
-			pins, err := backupScan(pinned)
-			if err != nil {
-				return "", err
-			}
-			existing = append(existing, pins...)
+			existing = append(existing, inventory[pinned][s.ID]...)
 		}
 		for _, other := range existing {
 			if other.id == s.ID {
@@ -558,8 +606,12 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 		destination := parts(r, s.Project, s.ID)
 		var old *session
 		var oldInfo fs.FileInfo
-		for _, p := range append(slices.Clone(destination), parts(pinned, s.Project, s.ID)...) {
-			if err := backupNoLinks(p); err != nil {
+		for i, p := range append(slices.Clone(destination), parts(pinned, s.Project, s.ID)...) {
+			store := r
+			if i >= len(destination) {
+				store = pinned
+			}
+			if err := backupNoLinks(p, store); err != nil {
 				return "", err
 			}
 			st, err := os.Lstat(p)
@@ -578,14 +630,8 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 			}
 		}
 		if old != nil {
-			trashSessions, err := backupScan(trash)
-			if err != nil {
-				return "", err
-			}
-			for _, other := range trashSessions {
-				if other.id == s.ID {
-					skip = "trash already contains a session with this ID"
-				}
+			if len(inventory[trash][s.ID]) > 0 {
+				skip = "trash already contains a session with this ID"
 			}
 			if trashClaims[s.ID] {
 				skip = "another replacement needs this trash recovery location"
@@ -594,7 +640,7 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 				skip = "existing session is already in trash"
 			}
 			for _, p := range parts(trash, s.Project, s.ID) {
-				if err := backupNoLinks(p); err != nil {
+				if err := backupNoLinks(p, trash); err != nil {
 					return "", err
 				}
 				if _, err := os.Lstat(p); err == nil {
@@ -611,12 +657,12 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 				}
 			}
 		}
-		zipPath, err := filepath.Abs(file)
-		if err != nil {
-			return "", err
-		}
 		for _, p := range destination {
-			if rel, err := filepath.Rel(p, zipPath); err == nil && (rel == "." || filepath.IsLocal(rel)) {
+			resolved, err := backupResolved(p)
+			if err != nil {
+				return "", err
+			}
+			if rel, err := filepath.Rel(resolved, zipPath); err == nil && (rel == "." || filepath.IsLocal(rel)) {
 				return "", errors.New("backup ZIP is inside a restore destination")
 			}
 		}
@@ -664,24 +710,24 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 		}
 		return msg
 	}
+	// Decisions can take time; refresh once before installing, then track our own changes.
+	inventory, err = snapshot()
+	if err != nil {
+		return result(), err
+	}
 	for _, j := range jobs {
 		s, r := j.entry, stores[j.entry.Category]
-		if err := backupNoLinks(r); err != nil {
-			return result(), err
+		for _, p := range parts(r, s.Project, s.ID) {
+			if err := backupNoLinks(p, r); err != nil {
+				return result(), err
+			}
 		}
 		if pid := openPid(s.ID); pid != "" {
 			return result(), fmt.Errorf("session %s started running; restore stopped", s.ID)
 		}
-		currentPool, err := backupScan(r)
-		if err != nil {
-			return result(), err
-		}
+		currentPool := slices.Clone(inventory[r][s.ID])
 		if s.Category == "live" {
-			pins, err := backupScan(pinned)
-			if err != nil {
-				return result(), err
-			}
-			currentPool = append(currentPool, pins...)
+			currentPool = append(currentPool, inventory[pinned][s.ID]...)
 		}
 		ambiguous := false
 		for _, current := range currentPool {
@@ -697,22 +743,12 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 			continue
 		}
 		if j.old != nil {
-			trashPool, err := backupScan(trash)
-			if err != nil {
-				return result(), err
-			}
-			occupied := false
-			for _, other := range trashPool {
-				if other.id == s.ID {
-					occupied = true
-				}
-			}
-			if occupied {
+			if len(inventory[trash][s.ID]) > 0 {
 				skipped = append(skipped, s.ID+": trash recovery location became occupied")
 				continue
 			}
 			for _, p := range parts(trash, s.Project, s.ID) {
-				if err := backupNoLinks(p); err != nil {
+				if err := backupNoLinks(p, trash); err != nil {
 					return result(), err
 				}
 			}
@@ -720,27 +756,17 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 			if err != nil || !os.SameFile(st, j.info) || st.Size() != j.info.Size() || !st.ModTime().Equal(j.info.ModTime()) {
 				return result(), errors.New("destination changed after review; restore stopped")
 			}
-			pool, err := backupScan(r)
-			if err != nil {
-				return result(), err
-			}
-			for i, current := range pool {
-				if current.id == s.ID && current.path != j.old.path {
-					return result(), errors.New("duplicate destination ID appeared after review")
-				}
-				if current.path == j.old.path {
-					pool[i] = j.old
-				}
-			}
-			if msg, ok := remove(pool, j.old, true, nil, trash); !ok {
+			if msg, ok := remove([]*session{j.old}, j.old, true, nil, trash); !ok {
 				return result(), errors.New(msg)
 			}
+			inventory[trash][s.ID] = append(inventory[trash][s.ID], &session{path: parts(trash, s.Project, s.ID)[0], id: s.ID})
 			if j.old.pinned || s.Category == "live" {
 				for _, p := range parts(pinned, s.Project, s.ID) {
 					if err := os.RemoveAll(p); err != nil {
 						return result(), fmt.Errorf("pin cleanup failed; original is in %s: %w", trash, err)
 					}
 				}
+				delete(inventory[pinned], s.ID)
 			}
 		}
 		err = backupInstall(stage, s, r)
@@ -755,6 +781,11 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 			return result(), err
 		}
 		installed++
+		st := &session{path: parts(r, s.Project, s.ID)[0], id: s.ID}
+		inventory[r][s.ID] = []*session{st}
+		if s.Pinned {
+			inventory[pinned][s.ID] = []*session{{path: parts(pinned, s.Project, s.ID)[0], id: s.ID}}
+		}
 	}
 	return result(), nil
 }
@@ -858,7 +889,7 @@ func backupInstall(stage string, s backupSession, destination string) error {
 }
 
 func backupChoose(t *tty, lines []line) string {
-	v := &view{prompt: "restore> ", items: []string{"Skip", "Overwrite", "Cancel"},
+	v := &view{fixed: true, items: []string{"Skip", "Overwrite", "Cancel"},
 		preview: func(int) []line { return lines }, foot: "↑↓ choose · ENTER confirm · ESC cancel"}
 	k, i := t.run(v)
 	if k != "enter" {
@@ -949,11 +980,11 @@ func backupCLI(action, file string, ids []string) error {
 }
 
 func (t *tty) backupDialog(action string, selected *session) string {
-	label, suggested := "backup> ", backupName()
+	suggested := backupName()
 	if action == "restore-backup" {
-		label, suggested = "restore-backup> ", ""
+		suggested = ""
 	}
-	v := &view{prompt: label, items: []string{"Session ZIP"}, edit: true, query: []rune(suggested), foot: "Type the ZIP path · ENTER continue · ESC cancel"}
+	v := &view{items: []string{"Session ZIP"}, edit: true, query: []rune(suggested), foot: "/" + action + " · Type the ZIP path · ENTER continue · ESC cancel"}
 	v.cur = len(v.query)
 	for {
 		if k, _ := t.run(v); k != "enter" {
