@@ -57,7 +57,7 @@ You can:
 * Archive sessions
 * Delete sessions
 
-In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/export`, `/delete`, `/folders`, `/list-archives`, `/list-deleted` and `/exit`. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
+In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/fork`, `/export`, `/delete`, `/list-folders`, `/list-archives`, `/list-deleted` and `/exit`. `/fork` resumes a copy of the session with Claude Code's `--fork-session`, leaving the original as it is. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
 
 Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
 

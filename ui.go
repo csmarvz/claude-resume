@@ -465,23 +465,24 @@ var cmds = map[string][]command{
 	"": {
 		{"/archive", "archive", "move the session to the archive, where it never expires"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/fork", "fork", "resume a copy of the session and leave the original as it is"},
 		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
-		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
+		{"/list-folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
 	},
 	"archive": {
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
 		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
-		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
+		{"/list-folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
 	},
 	"trash": {
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
 		{"/empty-trash", "empty-trash", "delete all deleted sessions for good"},
-		{"/folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
+		{"/list-folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
 	},
 }
 
@@ -680,6 +681,9 @@ func pick(all []*session) {
 			}
 			t.close()
 			resume(shown[i])
+		case "fork":
+			t.close()
+			resume(shown[i], "--fork-session")
 		case "pin", "unpin":
 			ok := true
 			if k == "pin" {
