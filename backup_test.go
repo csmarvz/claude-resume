@@ -87,7 +87,7 @@ func TestBackupRoundTrip(t *testing.T) {
 	}
 	backupTestStores(t)
 	msg, err := backupRestore(zipPath, func([]line) string { t.Fatal("unexpected conflict"); return "cancel" })
-	if err != nil || !strings.Contains(msg, "Restored 4") {
+	if err != nil || !strings.Contains(msg, "Restored 4 sessions; skipped 0.") {
 		t.Fatal(msg, err)
 	}
 	for i, category := range []string{"live", "archive", "trash", "live"} {
@@ -545,7 +545,7 @@ func TestBackupRestoreTracksTrashChanges(t *testing.T) {
 			backupTestStores(t)
 			original := backupTestSession(t, "live", "p", exportID, "original")
 			msg, err := backupRestore(file, func([]line) string { return "overwrite" })
-			if err != nil || !strings.Contains(msg, "Restored 1 session(s); skipped 1") {
+			if err != nil || !strings.Contains(msg, "Restored 1 session; skipped 1") {
 				t.Fatal(msg, err)
 			}
 			if trashFirst {

@@ -528,7 +528,7 @@ func backupSummary(s *session) ([]line, error) {
 		}
 		return true
 	})
-	out := []line{{"1", name(s)}, {"2", date(s) + " · " + human(total) + "B · " + s.id}, {"2", folder(s)}, {"1", "Last reply"}}
+	out := []line{{"1", name(s)}, {"2", date(s) + " · " + human(total) + "B · " + s.id}, {"2", tilde(s.cwd)}, {"1", "Last reply"}}
 	for _, l := range strings.Split(reply, "\n") {
 		out = append(out, line{"", l})
 	}
@@ -704,7 +704,11 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 	}
 	installed := 0
 	result := func() string {
-		msg := fmt.Sprintf("Restored %d session(s); skipped %d.", installed, len(skipped))
+		noun := "sessions"
+		if installed == 1 {
+			noun = "session"
+		}
+		msg := fmt.Sprintf("Restored %d %s; skipped %d.", installed, noun, len(skipped))
 		if len(skipped) > 0 {
 			msg += "\n" + strings.Join(skipped, "\n")
 		}
