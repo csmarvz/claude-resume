@@ -507,14 +507,29 @@ var shortcuts = [][2]string{
 	{"ESC", "go back, or quit"},
 }
 
-func help(cmds []command) []line {
-	l := []line{{"1", "Commands · type / on an empty search line"}}
-	for _, c := range cmds {
+func commands(mode string) []command {
+	list := slices.Clone(cmds[mode])
+	for _, c := range lists {
+		if c.key != "list:"+mode {
+			list = append(list, c)
+		}
+	}
+	return list
+}
+
+func help(mode string) []line {
+	l := []line{{"1", "Commands · type / on an empty search line, or after moving with the arrow keys"}}
+	if mode == "" {
+		l = append(l, line{"", fmt.Sprintf("  %-16s%s", "/pin, /unpin", "keep a session at the top and safe from Claude Code's cleanup (CTRL-T)")})
+	}
+	for _, c := range commands(mode) {
 		l = append(l, line{"", fmt.Sprintf("  %-16s%s", c.name, c.about)})
 	}
 	l = append(l, line{}, line{"1", "Shortcuts"})
 	for _, s := range shortcuts {
-		l = append(l, line{"", fmt.Sprintf("  %-16s%s", s[0], s[1])})
+		if s[0] != "CTRL-T" || mode == "" {
+			l = append(l, line{"", fmt.Sprintf("  %-16s%s", s[0], s[1])})
+		}
 	}
 	l = append(l, line{}, line{"1", "Command line"})
 	for _, u := range strings.Split(strings.TrimSpace(usageText), "\n") {
@@ -639,12 +654,7 @@ func pick(all []*session) {
 		if len(v.header) == 0 {
 			v.header = []string{""}
 		}
-		esc, enter, list := "quit", "resume", slices.Clone(cmds[mode])
-		for _, c := range lists {
-			if c.key != "list:"+mode {
-				list = append(list, c)
-			}
-		}
+		esc, enter, list := "quit", "resume", commands(mode)
 		if mode != "" {
 			esc, enter = "all sessions", "restore and resume"
 		}
@@ -661,10 +671,6 @@ func pick(all []*session) {
 		}
 		k, i := t.run(v)
 		exported = ""
-		full := slices.Clone(list)
-		if mode == "" {
-			full = append([]command{{"/pin, /unpin", "", "keep a session at the top and safe from Claude Code's cleanup (CTRL-T)"}}, full...)
-		}
 		if k == "/" && i < 0 {
 			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" })
 		}
@@ -705,20 +711,29 @@ func pick(all []*session) {
 			t.close()
 			os.Exit(0)
 		case "help":
-			saved, text := *v, help(full)
-			v.preview, v.foot, v.dim, v.hide, v.pscroll = func(int) []line { return text }, "↑↓ scroll · any other key goes back", true, false, 0
+			saved, text := *v, help(mode)
+			v.preview, v.foot, v.dim, v.hide, v.pscroll = func(int) []line { return text }, "↑↓ PGUP PGDN scroll · any other key goes back", true, false, 0
+		scroll:
 			for redraw := true; ; {
 				if redraw || t.resized() {
 					t.draw(v)
 				}
+				_, h := t.size()
 				k := t.read()
-				redraw = k != "" && k != "wake"
-				if k == "up" {
+				redraw = true
+				switch k {
+				case "", "wake":
+					redraw = false
+				case "up", "shift-up":
 					v.pscroll = max(0, v.pscroll-1)
-				} else if k == "down" {
+				case "down", "shift-down":
 					v.pscroll++
-				} else if redraw {
-					break
+				case "pgup":
+					v.pscroll = max(0, v.pscroll-h/3)
+				case "pgdn":
+					v.pscroll += h / 3
+				default:
+					break scroll
 				}
 			}
 			*v = saved

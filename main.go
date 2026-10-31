@@ -34,7 +34,7 @@ const usageText = `usage: claude-resume                       pick a session, or
        claude-resume --unpin <id>          unpin a session
        claude-resume update                install the latest release
        claude-resume -v                    show the installed version (--version)
-       claude-resume -h                    show this help (--help)
+       claude-resume -h                    show the command-line help (--help)
 `
 
 var (
