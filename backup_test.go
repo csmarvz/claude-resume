@@ -625,3 +625,29 @@ func TestBackupReconciliationRejectsNestedLinks(t *testing.T) {
 		t.Fatal("reconciliation changed the nested link", err)
 	}
 }
+
+func TestBackupHelpIntegration(t *testing.T) {
+	for _, mode := range []string{"", "archive", "trash"} {
+		var text strings.Builder
+		for _, line := range help(mode) {
+			text.WriteString(line.text + "\n")
+		}
+		for _, command := range []string{"/backup", "/backup-all", "/restore-backup", "/help", "/list-folders", "--backup <zip>", "--restore-backup <zip>", "--help"} {
+			if !strings.Contains(text.String(), command) {
+				t.Errorf("mode %q help is missing %q", mode, command)
+			}
+		}
+		count := 0
+		for _, command := range commands(mode) {
+			if command.key == "backup" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("mode %q has %d selected-session backup commands", mode, count)
+		}
+		if strings.Contains(text.String(), "/fork") != (mode == "") {
+			t.Errorf("mode %q has incorrect fork command visibility", mode)
+		}
+	}
+}

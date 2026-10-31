@@ -465,23 +465,24 @@ var cmds = map[string][]command{
 	"": {
 		{"/archive", "archive", "move the session to the archive, where it never expires"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
+		{"/fork", "fork", "resume a copy of the session and leave the original as it is"},
 		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
-		{"/folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
+		{"/list-folders", "ctrl-a", "show the sessions of one folder (CTRL-A)"},
 	},
 	"archive": {
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/rename", "ctrl-r", "rename the session (CTRL-R)"},
 		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "move the session to the trash for 30 days (CTRL-D)"},
-		{"/folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
+		{"/list-folders", "ctrl-a", "show the archived sessions of one folder (CTRL-A)"},
 	},
 	"trash": {
 		{"/restore", "restore", "move the session back to the session list"},
 		{"/export", "export", "save the session's prompts and replies as Markdown"},
 		{"/delete", "ctrl-d", "delete the session for good (CTRL-D)"},
 		{"/empty-trash", "empty-trash", "delete all deleted sessions for good"},
-		{"/folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
+		{"/list-folders", "ctrl-a", "show the deleted sessions of one folder (CTRL-A)"},
 	},
 }
 
@@ -491,7 +492,53 @@ var lists = []command{
 	{"/list-sessions", "list:", "show the sessions"},
 	{"/list-archives", "list:archive", "show the archived sessions"},
 	{"/list-deleted", "list:trash", "show the deleted sessions"},
+	{"/help", "help", "show all commands, shortcuts and command-line options"},
 	{"/exit", "exit", "quit claude-resume"},
+}
+
+var shortcuts = [][2]string{
+	{"↑↓ PGUP PGDN", "move through the list"},
+	{"ENTER", "resume the session; in the archive and trash, restore and resume it"},
+	{"CTRL-T", "pin or unpin the session"},
+	{"CTRL-R", "rename the session"},
+	{"CTRL-D", "delete the session"},
+	{"CTRL-A", "show the sessions of one folder"},
+	{"CTRL-SPACE", "show or hide the preview"},
+	{"SHIFT-↑↓", "scroll the preview"},
+	{"CTRL-U CTRL-W", "delete the search before the cursor, or the word before it"},
+	{"ESC", "go back, or quit"},
+}
+
+func commands(mode string) []command {
+	list := slices.Clone(cmds[mode])
+	list = append(list, command{"/backup", "backup", "back up the selected session as a ZIP"})
+	for _, c := range lists {
+		if c.key != "list:"+mode {
+			list = append(list, c)
+		}
+	}
+	return list
+}
+
+func help(mode string) []line {
+	l := []line{{"1", "Commands · type / on an empty search line, or after moving with the arrow keys"}}
+	if mode == "" {
+		l = append(l, line{"", fmt.Sprintf("  %-16s%s", "/pin, /unpin", "keep a session at the top and safe from Claude Code's cleanup (CTRL-T)")})
+	}
+	for _, c := range commands(mode) {
+		l = append(l, line{"", fmt.Sprintf("  %-16s%s", c.name, c.about)})
+	}
+	l = append(l, line{}, line{"1", "Shortcuts"})
+	for _, s := range shortcuts {
+		if s[0] != "CTRL-T" || mode == "" {
+			l = append(l, line{"", fmt.Sprintf("  %-16s%s", s[0], s[1])})
+		}
+	}
+	l = append(l, line{}, line{"1", "Command line"})
+	for _, u := range strings.Split(strings.TrimSpace(usageText), "\n") {
+		l = append(l, line{"", "  " + strings.TrimSpace(strings.TrimPrefix(u, "usage:"))})
+	}
+	return l
 }
 
 var note string
@@ -614,13 +661,7 @@ func pick(all []*session) {
 		if len(v.header) == 0 {
 			v.header = []string{""}
 		}
-		esc, enter, list := "quit", "resume", slices.Clone(cmds[mode])
-		list = append(list, command{"/backup", "backup", "back up the selected session as a ZIP"})
-		for _, c := range lists {
-			if c.key != "list:"+mode {
-				list = append(list, c)
-			}
-		}
+		esc, enter, list := "quit", "resume", commands(mode)
 		if mode != "" {
 			esc, enter = "all sessions", "restore and resume"
 		}
@@ -639,7 +680,7 @@ func pick(all []*session) {
 		exported = ""
 		if k == "/" && i < 0 {
 			list = slices.DeleteFunc(list, func(c command) bool {
-				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "backup-all" && c.key != "restore-backup"
+				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" && c.key != "backup-all" && c.key != "restore-backup"
 			})
 		}
 		if k == "/" && i >= 0 && mode == "" {
@@ -692,6 +733,33 @@ func pick(all []*session) {
 		case "exit":
 			t.close()
 			os.Exit(0)
+		case "help":
+			saved, text := *v, help(mode)
+			v.preview, v.foot, v.dim, v.hide, v.pscroll = func(int) []line { return text }, "↑↓ PGUP PGDN scroll · any other key goes back", true, false, 0
+		scroll:
+			for redraw := true; ; {
+				if redraw || t.resized() {
+					t.draw(v)
+				}
+				_, h := t.size()
+				k := t.read()
+				redraw = true
+				switch k {
+				case "", "wake":
+					redraw = false
+				case "up", "shift-up":
+					v.pscroll = max(0, v.pscroll-1)
+				case "down", "shift-down":
+					v.pscroll++
+				case "pgup":
+					v.pscroll = max(0, v.pscroll-h/3)
+				case "pgdn":
+					v.pscroll += h / 3
+				default:
+					break scroll
+				}
+			}
+			*v = saved
 		case "ctrl-a":
 			choose = true
 		case "enter":
@@ -703,6 +771,9 @@ func pick(all []*session) {
 			}
 			t.close()
 			resume(shown[i])
+		case "fork":
+			t.close()
+			resume(shown[i], "--fork-session")
 		case "pin", "unpin":
 			ok := true
 			if k == "pin" {

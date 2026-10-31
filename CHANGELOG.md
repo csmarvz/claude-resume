@@ -6,6 +6,23 @@
 
 - ZIP session backup and restore (#10): `/backup`, `/backup-all`, `--backup <zip> [<id>...]`, and `/restore-backup` or `--restore-backup <zip>`. Backups preserve raw session data, category, and pin state. Restore validates archives, compares conflicts, skips duplicate IDs, and preserves overwritten originals in trash. Detected running Windows sessions must be closed; other platforms warn that live copies are not consistent snapshots.
 
+## [0.0.12-alpha] - 2026-10-31
+
+### Added
+
+- `/help` shows every command, keyboard shortcut and command-line option in the preview box (#13).
+
+## [0.0.11-alpha] - 2026-10-31
+
+### Added
+
+- `/fork` resumes a copy of the selected session with Claude Code's `--fork-session`, leaving the original as it is (#21).
+
+### Changed
+
+- `/folders` is now `/list-folders`, like the other lists (#24). Typing `/folders` still finds it.
+- A session whose folder no longer exists resumes in the current folder, as Claude Code does, instead of stopping with an error (#15).
+
 ## [0.0.10-alpha] - 2026-10-30
 
 ### Added

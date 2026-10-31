@@ -22,20 +22,21 @@ import (
 	"golang.org/x/term"
 )
 
-const usageText = `usage: claude-resume                  pick a session, or list the last 10 outside a terminal
-       claude-resume -a               list all sessions (--all)
-       claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
-       claude-resume -r <id> <title>  rename a session (--rename)
+const usageText = `usage: claude-resume                       pick a session, or list the last 10 outside a terminal
+       claude-resume -a                    list all sessions (--all)
+       claude-resume <id>                  resume a session in its folder (a unique ID prefix is enough)
+       claude-resume -r <id> <title>       rename a session (--rename)
        claude-resume --export <id> [path]  save a session's prompts and replies as Markdown
        claude-resume --backup <zip> [<id>...]  back up explicit sessions, or all live sessions
        claude-resume --restore-backup <zip>   restore sessions from a backup
-       claude-resume -d [-y] <id>     move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
-       claude-resume --archive <id>   archive a session so that it never expires
-       claude-resume --restore <id>   move an archived or deleted session back to the session list
-       claude-resume --pin <id>       keep a session at the top of the list and safe from Claude Code's cleanup
-       claude-resume --unpin <id>     unpin a session
-       claude-resume update           install the latest release
-       claude-resume -v               show the installed version (--version)
+       claude-resume -d [-y] <id>          move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
+       claude-resume --archive <id>        archive a session so that it never expires
+       claude-resume --restore <id>        move an archived or deleted session back to the session list
+       claude-resume --pin <id>            keep a session at the top of the list and safe from Claude Code's cleanup
+       claude-resume --unpin <id>          unpin a session
+       claude-resume update                install the latest release
+       claude-resume -v                    show the installed version (--version)
+       claude-resume -h                    show the command-line help (--help)
 `
 
 var (
@@ -1071,7 +1072,7 @@ func unpin(s *session) string {
 	return "Unpinned \"" + name(s) + "\"."
 }
 
-func resume(s *session) {
+func resume(s *session, flags ...string) {
 	cwd := ""
 	eachLine(s.path, func(n int, _ []byte) bool { return n < 100 }, func(_ int, b []byte) bool {
 		var r record
@@ -1082,8 +1083,11 @@ func resume(s *session) {
 	if cwd == "" {
 		die("no folder recorded for session %s", s.id)
 	}
-	if os.Chdir(cwd) != nil {
-		die("folder %s no longer exists", cwd)
+	if err := os.Chdir(cwd); errors.Is(err, fs.ErrNotExist) {
+		here, _ := os.Getwd()
+		fmt.Fprintf(os.Stderr, "Folder %s no longer exists; resuming in %s.\n", printable(cwd), printable(here))
+	} else if err != nil {
+		die("cannot open folder %s: %v", printable(cwd), err)
 	}
-	execClaude(s.id)
+	execClaude(append([]string{"--resume", s.id}, flags...)...)
 }
