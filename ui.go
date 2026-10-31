@@ -489,7 +489,37 @@ var lists = []command{
 	{"/list-sessions", "list:", "show the sessions"},
 	{"/list-archives", "list:archive", "show the archived sessions"},
 	{"/list-deleted", "list:trash", "show the deleted sessions"},
+	{"/help", "help", "show all commands, shortcuts and command-line options"},
 	{"/exit", "exit", "quit claude-resume"},
+}
+
+var shortcuts = [][2]string{
+	{"↑↓ PGUP PGDN", "move through the list"},
+	{"ENTER", "resume the session; in the archive and trash, restore and resume it"},
+	{"CTRL-T", "pin or unpin the session"},
+	{"CTRL-R", "rename the session"},
+	{"CTRL-D", "delete the session"},
+	{"CTRL-A", "show the sessions of one folder"},
+	{"CTRL-SPACE", "show or hide the preview"},
+	{"SHIFT-↑↓", "scroll the preview"},
+	{"CTRL-U CTRL-W", "delete the search before the cursor, or the word before it"},
+	{"ESC", "go back, or quit"},
+}
+
+func help(cmds []command) []line {
+	l := []line{{"1", "Commands · type / on an empty search line"}}
+	for _, c := range cmds {
+		l = append(l, line{"", fmt.Sprintf("  %-16s%s", c.name, c.about)})
+	}
+	l = append(l, line{}, line{"1", "Shortcuts"})
+	for _, s := range shortcuts {
+		l = append(l, line{"", fmt.Sprintf("  %-16s%s", s[0], s[1])})
+	}
+	l = append(l, line{}, line{"1", "Command line"})
+	for _, u := range strings.Split(strings.TrimSpace(usageText), "\n") {
+		l = append(l, line{"", "  " + strings.TrimSpace(strings.TrimPrefix(u, "usage:"))})
+	}
+	return l
 }
 
 var note string
@@ -630,8 +660,12 @@ func pick(all []*session) {
 		}
 		k, i := t.run(v)
 		exported = ""
+		full := slices.Clone(list)
+		if mode == "" {
+			full = append([]command{{"/pin, /unpin", "", "keep a session at the top and safe from Claude Code's cleanup (CTRL-T)"}}, full...)
+		}
 		if k == "/" && i < 0 {
-			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" })
+			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" })
 		}
 		if k == "/" && i >= 0 && mode == "" {
 			c := command{"/pin", "pin", "keep the session at the top, safe from Claude Code's cleanup (CTRL-T)"}
@@ -669,6 +703,24 @@ func pick(all []*session) {
 		case "exit":
 			t.close()
 			os.Exit(0)
+		case "help":
+			saved, text := *v, help(full)
+			v.preview, v.foot, v.dim, v.hide, v.pscroll = func(int) []line { return text }, "↑↓ scroll · any other key goes back", true, false, 0
+			for redraw := true; ; {
+				if redraw || t.resized() {
+					t.draw(v)
+				}
+				k := t.read()
+				redraw = k != "" && k != "wake"
+				if k == "up" {
+					v.pscroll = max(0, v.pscroll-1)
+				} else if k == "down" {
+					v.pscroll++
+				} else if redraw {
+					break
+				}
+			}
+			*v = saved
 		case "ctrl-a":
 			choose = true
 		case "enter":

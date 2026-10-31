@@ -22,18 +22,19 @@ import (
 	"golang.org/x/term"
 )
 
-const usageText = `usage: claude-resume                  pick a session, or list the last 10 outside a terminal
-       claude-resume -a               list all sessions (--all)
-       claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
-       claude-resume -r <id> <title>  rename a session (--rename)
+const usageText = `usage: claude-resume                       pick a session, or list the last 10 outside a terminal
+       claude-resume -a                    list all sessions (--all)
+       claude-resume <id>                  resume a session in its folder (a unique ID prefix is enough)
+       claude-resume -r <id> <title>       rename a session (--rename)
        claude-resume --export <id> [path]  save a session's prompts and replies as Markdown
-       claude-resume -d [-y] <id>     move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
-       claude-resume --archive <id>   archive a session so that it never expires
-       claude-resume --restore <id>   move an archived or deleted session back to the session list
-       claude-resume --pin <id>       keep a session at the top of the list and safe from Claude Code's cleanup
-       claude-resume --unpin <id>     unpin a session
-       claude-resume update           install the latest release
-       claude-resume -v               show the installed version (--version)
+       claude-resume -d [-y] <id>          move a session to the trash for 30 days; asks first unless -y (--delete, --yes)
+       claude-resume --archive <id>        archive a session so that it never expires
+       claude-resume --restore <id>        move an archived or deleted session back to the session list
+       claude-resume --pin <id>            keep a session at the top of the list and safe from Claude Code's cleanup
+       claude-resume --unpin <id>          unpin a session
+       claude-resume update                install the latest release
+       claude-resume -v                    show the installed version (--version)
+       claude-resume -h                    show this help (--help)
 `
 
 var (
