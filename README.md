@@ -29,20 +29,20 @@ The only other requirement is the `claude` CLI, to resume sessions. Updates use 
 ## Usage
 
 ```
-claude-resume                  pick a session, or list the last 10 outside a terminal
-claude-resume -a               list all sessions (--all)
-claude-resume <id>             resume a session in its folder (a unique ID prefix is enough)
-claude-resume -r <id> <title>  rename a session (--rename)
+claude-resume                       pick a session, or list the last 10 outside a terminal
+claude-resume -a                    list all sessions (--all)
+claude-resume <id>                  resume a session in its folder (a unique ID prefix is enough)
+claude-resume -r <id> <title>       rename a session (--rename)
 claude-resume --export <id> [path]  save a session's prompts and replies as Markdown
-claude-resume -d <id>          move a session to the trash after a confirmation (--delete)
-claude-resume -d -y <id>       move it without asking; needs the full session ID (--yes)
-claude-resume --archive <id>   archive a session so that it never expires
-claude-resume --restore <id>   move an archived or deleted session back to the session list
-claude-resume --pin <id>       keep a session at the top of the list and safe from Claude Code's cleanup
-claude-resume --unpin <id>     unpin a session
-claude-resume update           install the latest release
-claude-resume -v               show the installed version (--version)
-claude-resume -h               show help (--help)
+claude-resume -d <id>               move a session to the trash after a confirmation (--delete)
+claude-resume -d -y <id>            move it without asking; needs the full session ID (--yes)
+claude-resume --archive <id>        archive a session so that it never expires
+claude-resume --restore <id>        move an archived or deleted session back to the session list
+claude-resume --pin <id>            keep a session at the top of the list and safe from Claude Code's cleanup
+claude-resume --unpin <id>          unpin a session
+claude-resume update                install the latest release
+claude-resume -v                    show the installed version (--version)
+claude-resume -h                    show help (--help)
 ```
 
 The title is the name you gave the session with `/rename`, otherwise the title claude generated, otherwise the first prompt. Sessions are read from `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` if that variable is unset.
@@ -57,7 +57,7 @@ You can:
 * Archive sessions
 * Delete sessions
 
-In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/fork`, `/export`, `/delete`, `/list-folders`, `/list-archives`, `/list-deleted` and `/exit`. `/fork` resumes a copy of the session with Claude Code's `--fork-session`, leaving the original as it is. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
+In the picker, type `/` to open the commands for the selected session: `/pin`, `/archive`, `/rename`, `/fork`, `/export`, `/delete`, `/list-folders`, `/list-archives`, `/list-deleted`, `/help` and `/exit`. `/help` shows every command, keyboard shortcut and command-line option in the preview box. `/fork` resumes a copy of the session with Claude Code's `--fork-session`, leaving the original as it is. In the archived and deleted lists, `/list-sessions` takes you back to the session list. The `/` opens them when the search line is empty or after you move through the results with the arrow keys; while you type a search, it stays part of the search.
 
 Renaming writes the same title record as `/rename` in Claude Code. Sessions that are open in a running Claude Code process are refused, because it could write its own title back.
 

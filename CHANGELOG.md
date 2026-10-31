@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `/help` shows every command, keyboard shortcut and command-line option in the preview box (#13).
+
 ## [0.0.11-alpha] - 2026-10-31
 
 ### Added
