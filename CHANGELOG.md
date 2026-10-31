@@ -6,6 +6,17 @@
 
 - `/help` shows every command, keyboard shortcut and command-line option in the preview box (#13).
 
+## [0.0.11-alpha] - 2026-10-31
+
+### Added
+
+- `/fork` resumes a copy of the selected session with Claude Code's `--fork-session`, leaving the original as it is (#21).
+
+### Changed
+
+- `/folders` is now `/list-folders`, like the other lists (#24). Typing `/folders` still finds it.
+- A session whose folder no longer exists resumes in the current folder, as Claude Code does, instead of stopping with an error (#15).
+
 ## [0.0.10-alpha] - 2026-10-30
 
 ### Added

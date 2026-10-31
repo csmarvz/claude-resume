@@ -16,12 +16,12 @@ func enableVT() {
 	}
 }
 
-func execClaude(id string) {
+func execClaude(args ...string) {
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		die("claude was not found on your PATH")
 	}
-	cmd := exec.Command(path, "--resume", id)
+	cmd := exec.Command(path, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		var e *exec.ExitError
