@@ -12,12 +12,12 @@ import (
 
 func enableVT() {}
 
-func execClaude(id string) {
+func execClaude(args ...string) {
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		die("claude was not found on your PATH")
 	}
-	err = syscall.Exec(path, []string{"claude", "--resume", id}, os.Environ())
+	err = syscall.Exec(path, append([]string{"claude"}, args...), os.Environ())
 	die("could not start claude: %v", err)
 }
 
