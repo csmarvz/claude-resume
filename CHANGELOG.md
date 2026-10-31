@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- ZIP session backup and restore (#10): `/backup`, `/backup-all`, `--backup <zip> [<id>...]`, and `/restore-backup` or `--restore-backup <zip>`. Backups preserve raw session data, category, and pin state. Restore validates archives, compares conflicts, skips duplicate IDs, and preserves overwritten originals in trash. Detected running Windows sessions must be closed; other platforms warn that live copies are not consistent snapshots.
+
 ### Changed
 
 - The search line has a border above and below it and a `❯` in place of the `search>`, `folder>`, `rename>` and `export>` labels. The count moved into the bottom border, which frees the row it used (#32).
