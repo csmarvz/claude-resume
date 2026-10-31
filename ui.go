@@ -486,6 +486,8 @@ var cmds = map[string][]command{
 }
 
 var lists = []command{
+	{"/backup-all", "backup-all", "back up all live sessions as a ZIP"},
+	{"/restore-backup", "restore-backup", "restore sessions from a ZIP backup"},
 	{"/list-sessions", "list:", "show the sessions"},
 	{"/list-archives", "list:archive", "show the archived sessions"},
 	{"/list-deleted", "list:trash", "show the deleted sessions"},
@@ -503,6 +505,7 @@ func pick(all []*session) {
 	var mu sync.Mutex
 	cache := map[string][]line{}
 	loading := map[string]bool{}
+	previewGeneration := 0
 	var shown []*session
 	v := &view{prompt: "search> ", keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true, "ctrl-t": true, "/": true}}
 	v.preview = func(i int) []line {
@@ -517,10 +520,13 @@ func pick(all []*session) {
 		}
 		if !loading[s.path] {
 			loading[s.path] = true
+			generation := previewGeneration
 			go func() {
 				l := preview(s)
 				mu.Lock()
-				cache[s.path] = l
+				if generation == previewGeneration {
+					cache[s.path] = l
+				}
 				mu.Unlock()
 				t.poke()
 			}()
@@ -609,6 +615,7 @@ func pick(all []*session) {
 			v.header = []string{""}
 		}
 		esc, enter, list := "quit", "resume", slices.Clone(cmds[mode])
+		list = append(list, command{"/backup", "backup", "back up the selected session as a ZIP"})
 		for _, c := range lists {
 			if c.key != "list:"+mode {
 				list = append(list, c)
@@ -631,7 +638,9 @@ func pick(all []*session) {
 		k, i := t.run(v)
 		exported = ""
 		if k == "/" && i < 0 {
-			list = slices.DeleteFunc(list, func(c command) bool { return !strings.HasPrefix(c.key, "list:") && c.key != "exit" })
+			list = slices.DeleteFunc(list, func(c command) bool {
+				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "backup-all" && c.key != "restore-backup"
+			})
 		}
 		if k == "/" && i >= 0 && mode == "" {
 			c := command{"/pin", "pin", "keep the session at the top, safe from Claude Code's cleanup (CTRL-T)"}
@@ -657,6 +666,20 @@ func pick(all []*session) {
 			continue
 		}
 		switch k {
+		case "backup", "backup-all", "restore-backup":
+			var selected *session
+			if k == "backup" {
+				selected = shown[i]
+			}
+			msg = t.backupDialog(k, selected)
+			all, arch, bin = scan(projects), scan(filepath.Join(archived, "projects")), scan(filepath.Join(trash, "projects"))
+			keep(all)
+			order(all)
+			mu.Lock()
+			cache = map[string][]line{}
+			loading = map[string]bool{}
+			previewGeneration++
+			mu.Unlock()
 		case "esc":
 			if dir != "" {
 				choose = true
