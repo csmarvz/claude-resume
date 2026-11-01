@@ -340,3 +340,16 @@ func TestWrap(t *testing.T) {
 		}
 	}
 }
+
+func TestCtrlN(t *testing.T) {
+	press := func(v *view, input string) (string, int) {
+		keys := make(chan []byte, 1)
+		return (&tty{out: bufio.NewWriter(&exportConfirmOutput{keys: keys, input: input}), keys: keys, wake: make(chan struct{})}).run(v)
+	}
+	if k, i := press(&view{keys: map[string]bool{"ctrl-n": true}, hide: true}, "\x0e\x1b"); k != "ctrl-n" || i != -1 {
+		t.Fatalf("empty list: %q %d", k, i)
+	}
+	if k, _ := press(&view{items: []string{"a", "b"}, hide: true}, "\x0e\x1b"); k != "esc" {
+		t.Fatalf("view without CTRL-N returned %q", k)
+	}
+}
