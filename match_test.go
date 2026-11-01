@@ -182,3 +182,46 @@ func TestPin(t *testing.T) {
 		t.Fatal("unpinning an old session keeps its old date")
 	}
 }
+
+func TestPreview(t *testing.T) {
+	dir := backupTestStores(t)
+	id := "02c5f13e-4af1-44da-a134-90f6fafa5d25"
+	text := strings.Join([]string{
+		`{"type":"user","gitBranch":"feat/limit","message":{"content":"fix the\tlimiter"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"first reply"}],"usage":{"input_tokens":100,"cache_read_input_tokens":1000}}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","content":"ignored"}]}}`,
+		`{"type":"user","message":{"content":"fix the limiter"}}`,
+		`{"type":"user","isMeta":true,"message":{"content":"meta"}}`,
+		`{"type":"user","message":{"content":"<command-name>/compact</command-name>"}}`,
+		`{"type":"user","message":{"content":"add a test"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"done\nall good"}],"usage":{"input_tokens":2,"cache_creation_input_tokens":1600}}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`,
+		`{"type":"assistant","message":{"content":"plain string"}}`,
+	}, "\n")
+	s := &session{path: filepath.Join(projects, "-dev-app", id+".jsonl"), id: id, cwd: filepath.Join(dir, "dev", "app"), title: "Limiter", mod: time.Date(2026, 10, 22, 11, 47, 0, 0, time.Local)}
+	backupTestWrite(t, s.path, text)
+	want := []line{
+		{"1", "Limiter"},
+		{"2", "~" + string(filepath.Separator) + filepath.Join("dev", "app") + "  ·  2026-10-22 11:47  ·  " + id},
+		{"2", "feat/limit  ·  " + human(int64(len(text))) + "B  ·  2k tokens"},
+		{},
+		{"1", "Last reply"},
+		{"", "done"},
+		{"", "all good"},
+		{},
+		{"1", "Prompts"},
+		{"", "› fix the limiter"},
+		{"", "› add a test"},
+	}
+	if got := preview(s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("preview =\n%q\nwant\n%q", got, want)
+	}
+
+	empty := &session{path: filepath.Join(projects, "-dev-app", "empty.jsonl"), id: "empty", cwd: "/elsewhere", mod: s.mod}
+	text = `{"type":"user","gitBranch":"HEAD","message":{"content":"<ide_opened_file>x</ide_opened_file>"}}`
+	backupTestWrite(t, empty.path, text)
+	got := preview(empty)
+	if got[0].text != "(untitled)" || got[2].text != human(int64(len(text)))+"B" || got[5].text != "(none)" || got[len(got)-1].text != "(none)" {
+		t.Fatalf("empty preview = %q", got)
+	}
+}
