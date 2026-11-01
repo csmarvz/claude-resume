@@ -318,3 +318,25 @@ func TestColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestWrap(t *testing.T) {
+	for _, c := range []struct {
+		text string
+		w    int
+		want []line
+	}{
+		{"", 10, []line{{"1", ""}}},
+		{"Save as Markdown (CTRL-D)", 12, []line{{"1", "Save as"}, {"cont1", "Markdown"}, {"cont1", "(CTRL-D)"}}},
+		{"fits as is", 10, []line{{"1", "fits as is"}}},
+		{"abc def", 5, []line{{"1", "abc"}, {"cont1", "def"}}},
+		{"abcd efgh", 4, []line{{"1", "abcd"}, {"cont1", "ef"}, {"cont1", "gh"}}},
+		{"ab    cd", 4, []line{{"1", "ab"}, {"cont1", "cd"}}},
+		{"-d     move it", 8, []line{{"1", "-d"}, {"cont1", "move"}, {"cont1", "it"}}},
+		{"a /very/long/path", 8, []line{{"1", "a"}, {"cont1", "/very/"}, {"cont1", "long/p"}, {"cont1", "ath"}}},
+		{"  indented", 6, []line{{"1", "  inde"}, {"cont1", "nted"}}},
+	} {
+		if got := wrap([]line{{"1", c.text}}, c.w); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("wrap(%q, %d) = %q, want %q", c.text, c.w, got, c.want)
+		}
+	}
+}

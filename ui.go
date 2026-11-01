@@ -332,14 +332,19 @@ func wrap(lines []line, w int) []line {
 	w = max(w, 3)
 	var out []line
 	for _, l := range lines {
-		s := cut(l.text, w)
-		out = append(out, line{l.style, s})
-		for rest := l.text[len(s):]; rest != ""; rest = rest[len(s):] {
-			if s = cut(rest, w-2); s == "" {
-				_, n := utf8.DecodeRuneInString(rest)
-				s = rest[:n]
+		style, rest, n := l.style, l.text, w
+		for first := true; first || rest != ""; first, style, n = false, "cont"+l.style, w-2 {
+			s := cut(rest, n)
+			if s == "" {
+				_, k := utf8.DecodeRuneInString(rest)
+				s = rest[:k]
 			}
-			out = append(out, line{"cont" + l.style, s})
+			next := rest[len(s):]
+			if j := strings.LastIndex(rest[:min(len(rest), len(s)+1)], " "); next != "" && j > 0 && strings.TrimRight(rest[:j], " ") != "" {
+				s, next = strings.TrimRight(rest[:j], " "), strings.TrimLeft(rest[j:], " ")
+			}
+			out = append(out, line{style, s})
+			rest = next
 		}
 	}
 	return out
