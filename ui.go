@@ -205,12 +205,18 @@ func (t *tty) run(v *view) (string, int) {
 			t.draw(v)
 		}
 		k := t.read()
-		if v.fixed && !slices.Contains([]string{"", "wake", "esc", "enter", "up", "down", "pgup", "pgdn", "shift-up", "shift-down", "ctrl-space"}, k) {
+		if v.fixed && !v.keys[k] && !slices.Contains([]string{"", "wake", "esc", "enter", "up", "down", "pgup", "pgdn", "shift-up", "shift-down", "ctrl-space"}, k) {
 			continue
 		}
 		redraw = k != ""
 		n := len(v.shown)
 		edited := false
+		if v.fixed && v.keys[k] {
+			if n > 0 {
+				return k, v.shown[v.sel]
+			}
+			continue
+		}
 		switch k {
 		case "", "wake":
 			continue
@@ -507,6 +513,7 @@ var lists = []command{
 	{"/list-sessions", "list:", "show the sessions"},
 	{"/list-archives", "list:archive", "show the archived sessions"},
 	{"/list-deleted", "list:trash", "show the deleted sessions"},
+	{"/columns", "columns", "choose which columns the list shows"},
 	{"/help", "help", "show all commands, shortcuts and command-line options"},
 	{"/exit", "exit", "quit claude-resume"},
 }
@@ -647,7 +654,7 @@ func pick(all []*session) {
 		if len(shown) == 0 {
 			dir, shown = "", append(shown, *pool...)
 		}
-		v.items, v.bold = rows(shown), map[int]bool{}
+		v.items, v.bold = rows(shown, columns), map[int]bool{}
 		for j, s := range shown {
 			v.bold[j] = s.pinned
 		}
@@ -692,7 +699,7 @@ func pick(all []*session) {
 		exported = ""
 		if k == "/" && i < 0 {
 			list = slices.DeleteFunc(list, func(c command) bool {
-				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" && c.key != "backup-all" && c.key != "restore-backup"
+				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" && c.key != "columns" && c.key != "backup-all" && c.key != "restore-backup"
 			})
 		}
 		if k == "/" && i >= 0 && mode == "" {
@@ -774,6 +781,8 @@ func pick(all []*session) {
 			*v = saved
 		case "ctrl-a":
 			choose = true
+		case "columns":
+			msg = t.columns(shown, v.hide)
 		case "enter":
 			if mode != "" {
 				var ok bool
@@ -878,7 +887,7 @@ func pick(all []*session) {
 				}
 			}
 			lines := []line{{"1;31", "WARNING: this permanently deletes every session below. It cannot be undone."}, {}}
-			for _, r := range rows(bin) {
+			for _, r := range rows(bin, columns) {
 				lines = append(lines, line{"", strings.ReplaceAll(r, "\t", "  ")})
 			}
 			msg = "Cancelled, nothing was deleted."
@@ -889,6 +898,74 @@ func pick(all []*session) {
 				}
 				bin = scan(filepath.Join(trash, "projects"))
 			}
+		}
+	}
+}
+
+func (t *tty) columns(shown []*session, hide bool) string {
+	list, sample := slices.Clone(columns), shown[:min(8, len(shown))]
+	on, ref := slices.Clone(columns), known(append(slices.Clone(layout), allColumns...))
+	for k, c := range ref {
+		if !slices.Contains(list, c) {
+			j := 0
+			if k > 0 {
+				j = slices.Index(list, ref[k-1]) + 1
+			}
+			list = slices.Insert(list, j, c)
+		}
+	}
+	chosen := func() []string {
+		return slices.DeleteFunc(slices.Clone(list), func(c string) bool { return !slices.Contains(on, c) })
+	}
+	c := &view{fixed: true, hide: hide, keys: map[string]bool{" ": true, "shift-up": true, "shift-down": true},
+		foot: "↑↓ select · SPACE show or hide · SHIFT-↑↓ move · ENTER save · ESC cancel"}
+	c.preview = func(int) []line {
+		if stats(on) {
+			for _, s := range sample {
+				if !s.counted {
+					s.count()
+				}
+			}
+		}
+		out := []line{{"1", "Preview"}}
+		for _, r := range rows(sample, chosen()) {
+			out = append(out, line{"", strings.ReplaceAll(r, "\t", "  ")})
+		}
+		return out
+	}
+	for {
+		c.items = c.items[:0]
+		for _, col := range list {
+			box := "[ ] "
+			if slices.Contains(on, col) {
+				box = "[x] "
+			}
+			if col == "id" {
+				col = "session ID"
+			}
+			if col == "pin" {
+				col = "pin ★"
+			}
+			c.items = append(c.items, box+col)
+		}
+		k, i := t.run(c)
+		switch {
+		case k == " " && slices.Contains(on, list[i]):
+			on = slices.DeleteFunc(on, func(o string) bool { return o == list[i] })
+		case k == " ":
+			on = append(on, list[i])
+		case k == "shift-up" && i > 0:
+			list[i], list[i-1], c.sel = list[i-1], list[i], i-1
+		case k == "shift-down" && i < len(list)-1:
+			list[i], list[i+1], c.sel = list[i+1], list[i], i+1
+		case k == "enter":
+			columns, layout = chosen(), list
+			if err := saveSettings(); err != nil {
+				return "Columns changed for this run only: " + printable(err.Error())
+			}
+			return "Columns saved."
+		case k == "esc":
+			return ""
 		}
 	}
 }

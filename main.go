@@ -46,7 +46,12 @@ var (
 	archived string
 	trash    string
 	pinned   string
+	settings string
 	cleanup  = func() {}
+
+	columns    = []string{"pin", "date", "title", "folder", "id"}
+	allColumns = []string{"pin", "date", "title", "folder", "size", "tokens", "id"}
+	layout     = allColumns
 
 	customMark     = []byte(`"type":"custom-title"`)
 	aiMark         = []byte(`"type":"ai-title"`)
@@ -61,6 +66,9 @@ type session struct {
 	cwd, title string
 	loaded     bool
 	pinned     bool
+	size       int64
+	tokens     int
+	counted    bool
 }
 
 type record struct {
@@ -210,6 +218,8 @@ func main() {
 	archived = filepath.Join(home, ".claude-resume", "archive")
 	trash = filepath.Join(home, ".claude-resume", "trash")
 	pinned = filepath.Join(home, ".claude-resume", "pinned")
+	settings = filepath.Join(home, ".claude-resume", "settings.json")
+	loadSettings()
 	if arg == "--backup" || arg == "--restore-backup" {
 		if err := backupCLI(arg, args[1], args[2:len(args)-1]); err != nil {
 			die("%s", printable(err.Error()))
@@ -451,7 +461,75 @@ func (s *session) load() {
 	s.cwd, s.title, s.loaded = cwd, squeeze(title), true
 }
 
+func (r *record) tokens() int {
+	u := r.Message.Usage
+	return u.Input + u.CacheCreate + u.CacheRead
+}
+
+func (s *session) count() {
+	tokens := 0
+	eachLine(s.path, func(int, []byte) bool { return true }, func(_ int, b []byte) bool {
+		if bytes.Contains(b, assistantMark) {
+			var r record
+			json.Unmarshal(b, &r)
+			if n := r.tokens(); n > 0 {
+				tokens = n
+			}
+		}
+		return true
+	})
+	s.size, s.tokens, s.counted = diskSize(s), tokens, true
+}
+
+func diskSize(s *session) int64 {
+	var n int64
+	for _, p := range files(s) {
+		n += size(p)
+	}
+	return n
+}
+
+func kTokens(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dk", (n+500)/1000)
+}
+
+func stats(cols []string) bool {
+	return slices.Contains(cols, "size") || slices.Contains(cols, "tokens")
+}
+
+func known(cols []string) []string {
+	var out []string
+	for _, c := range cols {
+		if slices.Contains(allColumns, c) && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func loadSettings() {
+	var st struct {
+		Columns *[]string `json:"columns"`
+		Order   []string  `json:"order"`
+	}
+	if b, err := os.ReadFile(settings); err == nil && json.Unmarshal(b, &st) == nil && st.Columns != nil {
+		columns, layout = known(*st.Columns), known(st.Order)
+	}
+}
+
+func saveSettings() error {
+	b, _ := json.MarshalIndent(map[string][]string{"columns": append([]string{}, columns...), "order": layout}, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(settings, append(b, '\n'), 0o600)
+}
+
 func loadAll(list []*session) {
+	need := stats(columns)
 	ch := make(chan *session)
 	var wg sync.WaitGroup
 	for i := 0; i < runtime.NumCPU()*2; i++ {
@@ -459,12 +537,17 @@ func loadAll(list []*session) {
 		go func() {
 			defer wg.Done()
 			for s := range ch {
-				s.load()
+				if !s.loaded {
+					s.load()
+				}
+				if need && !s.counted {
+					s.count()
+				}
 			}
 		}()
 	}
 	for _, s := range list {
-		if !s.loaded {
+		if !s.loaded || need && !s.counted {
 			ch <- s
 		}
 	}
@@ -566,22 +649,52 @@ func width(s string) int {
 	return w
 }
 
-func rows(list []*session) []string {
-	tw, cw, mark := 0, 0, slices.ContainsFunc(list, func(s *session) bool { return s.pinned })
+func rows(list []*session, cols []string) []string {
+	tw, cw, sw, kw, mark := 0, 0, 0, 0, slices.ContainsFunc(list, func(s *session) bool { return s.pinned })
 	for _, s := range list {
 		tw = max(tw, width(cut(s.title, 50)))
 		cw = max(cw, width(tilde(s.cwd)))
+		sw = max(sw, len(human(s.size)+"B"))
+		kw = max(kw, len(kTokens(s.tokens)))
 	}
 	out := make([]string, len(list))
 	for i, s := range list {
-		t, c, p := cut(s.title, 50), tilde(s.cwd), ""
-		if mark {
-			p = "  "
+		var l, r []string
+		side := &l
+		for _, c := range cols {
+			switch c {
+			case "pin":
+				if s.pinned {
+					*side = append(*side, "★")
+				} else if mark {
+					*side = append(*side, " ")
+				}
+			case "date":
+				*side = append(*side, date(s))
+			case "title":
+				t := cut(s.title, 50)
+				l = append(l, t+strings.Repeat(" ", tw-width(t)))
+				side = &r
+			case "folder":
+				f := tilde(s.cwd)
+				*side = append(*side, f+strings.Repeat(" ", cw-width(f)))
+			case "size":
+				*side = append(*side, fmt.Sprintf("%*s", sw, human(s.size)+"B"))
+			case "tokens":
+				*side = append(*side, fmt.Sprintf("%*s", kw, kTokens(s.tokens)))
+			case "id":
+				*side = append(*side, s.id)
+			}
 		}
-		if s.pinned {
-			p = "★ "
+		out[i] = strings.Join(l, "  ")
+		switch {
+		case len(r) == 0:
+			out[i] = strings.TrimRight(out[i], " ")
+		case len(l) > 0:
+			out[i] += "\t" + strings.Join(r, "  ")
+		default:
+			out[i] += strings.Join(r, "  ")
 		}
-		out[i] = fmt.Sprintf("%s%s  %s%*s\t%s%*s  %s", p, date(s), t, tw-width(t), "", c, cw-width(c), "", s.id)
 	}
 	return out
 }
@@ -590,7 +703,7 @@ func list(all []*session, n int) {
 	sub := all[:min(n, len(all))]
 	loadAll(sub)
 	w := bufio.NewWriter(os.Stdout)
-	for _, r := range rows(sub) {
+	for _, r := range rows(sub, columns) {
 		fmt.Fprintln(w, strings.ReplaceAll(r, "\t", "  "))
 	}
 	w.Flush()
@@ -610,8 +723,8 @@ func preview(s *session) []line {
 		if r.GitBranch != "" {
 			branch = squeeze(r.GitBranch)
 		}
-		if u := r.Message.Usage; u.Input+u.CacheCreate+u.CacheRead > 0 {
-			tokens = u.Input + u.CacheCreate + u.CacheRead
+		if n := r.tokens(); n > 0 {
+			tokens = n
 		}
 		if r.Type == "assistant" && bytes.HasPrefix(r.Message.Content, []byte("[")) {
 			if t, _ := text(r.Message.Content, "\n"); t != "" {
@@ -633,16 +746,12 @@ func preview(s *session) []line {
 	if reply == "" {
 		reply = "(none)"
 	}
-	var n int64
-	for _, p := range files(s) {
-		n += size(p)
-	}
-	meta := []string{human(n) + "B"}
+	meta := []string{human(diskSize(s)) + "B"}
 	if branch != "" && branch != "HEAD" {
 		meta = append([]string{branch}, meta...)
 	}
-	if tokens > 0 {
-		meta = append(meta, fmt.Sprintf("%dk tokens", (tokens+500)/1000))
+	if t := kTokens(tokens); t != "" {
+		meta = append(meta, t+" tokens")
 	}
 	out := []line{{"1", title}, {"2", tilde(s.cwd) + "  ·  " + date(s) + "  ·  " + s.id}, {"2", strings.Join(meta, "  ·  ")}, {}, {"1", "Last reply"}}
 	for _, l := range strings.Split(cut(reply, 1500), "\n") {
