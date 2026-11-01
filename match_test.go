@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"io/fs"
 	"os"
@@ -223,5 +224,82 @@ func TestPreview(t *testing.T) {
 	got := preview(empty)
 	if got[0].text != "(untitled)" || got[2].text != human(int64(len(text)))+"B" || got[5].text != "(none)" || got[len(got)-1].text != "(none)" {
 		t.Fatalf("empty preview = %q", got)
+	}
+}
+
+func TestColumns(t *testing.T) {
+	dir := backupTestStores(t)
+	oldSettings, oldColumns := settings, columns
+	t.Cleanup(func() { settings, columns = oldSettings, oldColumns })
+	settings = filepath.Join(dir, ".claude-resume", "settings.json")
+	a := &session{path: filepath.Join(projects, "-w-app", "aaaaaaaa-0000-4000-8000-000000000000.jsonl"), id: "aaaaaaaa-0000-4000-8000-000000000000"}
+	b := &session{path: filepath.Join(projects, "-w-longer-folder", "bbbbbbbb-0000-4000-8000-000000000000.jsonl"), id: "bbbbbbbb-0000-4000-8000-000000000000"}
+	backupTestWrite(t, a.path, `{"type":"user","cwd":"/w/app","message":{"content":"first"}}`+"\n"+
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1499}}}`+"\n"+
+		`{"type":"assistant","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"failed"}],"usage":{"input_tokens":0}}}`)
+	backupTestWrite(t, b.path, `{"type":"user","cwd":"/w/longer-folder","message":{"content":"second"}}`)
+	list := []*session{a, b}
+
+	choose := func(input string) string {
+		keys := make(chan []byte, 1)
+		out := &exportConfirmOutput{keys: keys, input: input}
+		return (&tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}).columns(list, false)
+	}
+	if msg := choose(" \x1b[B\x1b[B\x1b[B \x1b[B x\x1b"); msg != "" || !reflect.DeepEqual(columns, oldColumns) {
+		t.Fatalf("ESC changed columns: %q %v", msg, columns)
+	}
+	if _, err := os.Stat(settings); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("ESC wrote settings: %v", err)
+	}
+	if msg := choose(" \x1b[B\x1b[B\x1b[B \x1b[B x\r"); msg != "Columns saved." {
+		t.Fatalf("msg = %q", msg)
+	}
+	want := []string{"title", "folder", "size", "tokens", "id"}
+	if !reflect.DeepEqual(columns, want) {
+		t.Fatalf("columns = %v, want %v", columns, want)
+	}
+	columns = nil
+	loadSettings()
+	if !reflect.DeepEqual(columns, want) {
+		t.Fatalf("saved columns = %v, want %v", columns, want)
+	}
+
+	list = []*session{{path: a.path, id: a.id, pinned: true}, {path: b.path, id: b.id}}
+	loadAll(list)
+	got := rows(list, columns)
+	wantRows := []string{
+		"★ first \t/w/app            292B  1k  aaaaaaaa-0000-4000-8000-000000000000",
+		"  second\t/w/longer-folder   71B      bbbbbbbb-0000-4000-8000-000000000000",
+	}
+	if !reflect.DeepEqual(got, wantRows) {
+		t.Fatalf("rows =\n%q\nwant\n%q", got, wantRows)
+	}
+	if got := rows(list, []string{"id"}); got[0] != "★ "+a.id {
+		t.Fatalf("id only = %q", got)
+	}
+	if got := rows(list, []string{"date", "title"}); strings.HasSuffix(got[0], " ") || strings.Contains(got[0], "\t") {
+		t.Fatalf("left only = %q", got)
+	}
+
+	if msg := choose("\x1b[1;2A\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[1;2A\x1b[1;2A\x1b[1;2A\x1b[1;2A\x1b[1;2B\x1b[1;2A\r"); msg != "Columns saved." {
+		t.Fatalf("msg = %q", msg)
+	}
+	if want := []string{"id", "title", "folder", "size", "tokens"}; !reflect.DeepEqual(columns, want) {
+		t.Fatalf("moved columns = %v, want %v", columns, want)
+	}
+	if got := rows(list, columns)[0]; got != "★ "+a.id+"  first \t/w/app            292B  1k" {
+		t.Fatalf("moved row = %q", got)
+	}
+	if got := rows(list, []string{"folder", "id"})[1]; got != "  /w/longer-folder  "+b.id {
+		t.Fatalf("no title row = %q", got)
+	}
+
+	for text, want := range map[string][]string{`{"columns":["id","bogus","date","id"]}`: {"id", "date"}, `{"columns":[]}`: nil, `not json`: {"x"}, `{}`: {"x"}} {
+		columns = []string{"x"}
+		backupTestWrite(t, settings, text)
+		loadSettings()
+		if !reflect.DeepEqual(columns, want) {
+			t.Fatalf("%s: columns = %v, want %v", text, columns, want)
+		}
 	}
 }
