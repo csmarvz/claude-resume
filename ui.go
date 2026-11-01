@@ -103,7 +103,7 @@ var csi = map[string]string{
 
 var ctrl = map[byte]string{
 	0x00: "ctrl-space", 0x01: "ctrl-a", 0x02: "left", 0x03: "esc", 0x04: "ctrl-d", 0x05: "end", 0x06: "right",
-	0x08: "bs", 0x7f: "bs", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "down", 0x10: "up",
+	0x08: "bs", 0x7f: "bs", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "ctrl-n", 0x10: "up",
 	0x12: "ctrl-r", 0x14: "ctrl-t", 0x15: "ctrl-u", 0x17: "ctrl-w",
 }
 
@@ -222,7 +222,7 @@ func (t *tty) run(v *view) (string, int) {
 			continue
 		case "esc":
 			return k, -1
-		case "ctrl-a":
+		case "ctrl-a", "ctrl-n":
 			if v.keys[k] {
 				return k, -1
 			}
@@ -518,6 +518,7 @@ var lists = []command{
 	{"/list-sessions", "list:", "show the sessions"},
 	{"/list-archives", "list:archive", "show the archived sessions"},
 	{"/list-deleted", "list:trash", "show the deleted sessions"},
+	{"/new", "new", "start a new Claude Code session in the folder claude-resume was started from (CTRL-N)"},
 	{"/columns", "columns", "choose which columns the list shows"},
 	{"/help", "help", "show all commands, shortcuts and command-line options"},
 	{"/exit", "exit", "quit claude-resume"},
@@ -530,6 +531,7 @@ var shortcuts = [][2]string{
 	{"CTRL-R", "rename the session"},
 	{"CTRL-D", "delete the session"},
 	{"CTRL-A", "show the sessions of one folder"},
+	{"CTRL-N", "start a new Claude Code session"},
 	{"CTRL-SPACE", "show or hide the preview"},
 	{"SHIFT-↑↓", "scroll the preview"},
 	{"CTRL-U CTRL-W", "delete the search before the cursor, or the word before it"},
@@ -581,7 +583,7 @@ func pick(all []*session) {
 	loading := map[string]bool{}
 	previewGeneration := 0
 	var shown []*session
-	v := &view{keys: map[string]bool{"ctrl-a": true, "ctrl-d": true, "ctrl-r": true, "ctrl-t": true, "/": true}}
+	v := &view{keys: map[string]bool{"ctrl-a": true, "ctrl-n": true, "ctrl-d": true, "ctrl-r": true, "ctrl-t": true, "/": true}}
 	v.preview = func(i int) []line {
 		if i < 0 {
 			return nil
@@ -704,7 +706,7 @@ func pick(all []*session) {
 		exported = ""
 		if k == "/" && i < 0 {
 			list = slices.DeleteFunc(list, func(c command) bool {
-				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" && c.key != "columns" && c.key != "backup-all" && c.key != "restore-backup"
+				return !strings.HasPrefix(c.key, "list:") && c.key != "exit" && c.key != "help" && c.key != "new" && c.key != "columns" && c.key != "backup-all" && c.key != "restore-backup"
 			})
 		}
 		if k == "/" && i >= 0 && mode == "" {
@@ -757,6 +759,9 @@ func pick(all []*session) {
 		case "exit":
 			t.close()
 			os.Exit(0)
+		case "new", "ctrl-n":
+			t.close()
+			execClaude()
 		case "help":
 			saved, text := *v, help(mode)
 			v.preview, v.foot, v.dim, v.hide, v.pscroll = func(int) []line { return text }, "↑↓ PGUP PGDN scroll · any other key goes back", true, false, 0

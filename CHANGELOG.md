@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/new` and CTRL-N start a new Claude Code session in the folder claude-resume was started from (#47). CTRL-N used to move down the list; the arrow keys and CTRL-J still do.
+
 ### Fixed
 
 - Lines in the preview box wrap at the last space that fits instead of in the middle of a word (#35). A word wider than the box, such as a long path, is still cut.
