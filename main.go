@@ -49,8 +49,9 @@ var (
 	settings string
 	cleanup  = func() {}
 
-	columns    = []string{"date", "title", "folder", "id"}
-	allColumns = []string{"date", "title", "folder", "size", "tokens", "id"}
+	columns    = []string{"pin", "date", "title", "folder", "id"}
+	allColumns = []string{"pin", "date", "title", "folder", "size", "tokens", "id"}
+	layout     = allColumns
 
 	customMark     = []byte(`"type":"custom-title"`)
 	aiMark         = []byte(`"type":"ai-title"`)
@@ -512,14 +513,15 @@ func known(cols []string) []string {
 func loadSettings() {
 	var st struct {
 		Columns *[]string `json:"columns"`
+		Order   []string  `json:"order"`
 	}
 	if b, err := os.ReadFile(settings); err == nil && json.Unmarshal(b, &st) == nil && st.Columns != nil {
-		columns = known(*st.Columns)
+		columns, layout = known(*st.Columns), known(st.Order)
 	}
 }
 
 func saveSettings() error {
-	b, _ := json.MarshalIndent(map[string][]string{"columns": append([]string{}, columns...)}, "", "  ")
+	b, _ := json.MarshalIndent(map[string][]string{"columns": append([]string{}, columns...), "order": layout}, "", "  ")
 	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 		return err
 	}
@@ -661,6 +663,12 @@ func rows(list []*session, cols []string) []string {
 		side := &l
 		for _, c := range cols {
 			switch c {
+			case "pin":
+				if s.pinned {
+					*side = append(*side, "★")
+				} else if mark {
+					*side = append(*side, " ")
+				}
 			case "date":
 				*side = append(*side, date(s))
 			case "title":
@@ -678,14 +686,7 @@ func rows(list []*session, cols []string) []string {
 				*side = append(*side, s.id)
 			}
 		}
-		p := ""
-		if mark {
-			p = "  "
-		}
-		if s.pinned {
-			p = "★ "
-		}
-		out[i] = p + strings.Join(l, "  ")
+		out[i] = strings.Join(l, "  ")
 		switch {
 		case len(r) == 0:
 			out[i] = strings.TrimRight(out[i], " ")

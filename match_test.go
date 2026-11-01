@@ -229,8 +229,8 @@ func TestPreview(t *testing.T) {
 
 func TestColumns(t *testing.T) {
 	dir := backupTestStores(t)
-	oldSettings, oldColumns := settings, columns
-	t.Cleanup(func() { settings, columns = oldSettings, oldColumns })
+	oldSettings, oldColumns, oldLayout := settings, columns, layout
+	t.Cleanup(func() { settings, columns, layout = oldSettings, oldColumns, oldLayout })
 	settings = filepath.Join(dir, ".claude-resume", "settings.json")
 	a := &session{path: filepath.Join(projects, "-w-app", "aaaaaaaa-0000-4000-8000-000000000000.jsonl"), id: "aaaaaaaa-0000-4000-8000-000000000000"}
 	b := &session{path: filepath.Join(projects, "-w-longer-folder", "bbbbbbbb-0000-4000-8000-000000000000.jsonl"), id: "bbbbbbbb-0000-4000-8000-000000000000"}
@@ -245,16 +245,16 @@ func TestColumns(t *testing.T) {
 		out := &exportConfirmOutput{keys: keys, input: input}
 		return (&tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}).columns(list, false)
 	}
-	if msg := choose(" \x1b[B\x1b[B\x1b[B \x1b[B x\x1b"); msg != "" || !reflect.DeepEqual(columns, oldColumns) {
+	if msg := choose("\x1b[B \x1b[B\x1b[B\x1b[B \x1b[B x\x1b"); msg != "" || !reflect.DeepEqual(columns, oldColumns) {
 		t.Fatalf("ESC changed columns: %q %v", msg, columns)
 	}
 	if _, err := os.Stat(settings); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("ESC wrote settings: %v", err)
 	}
-	if msg := choose(" \x1b[B\x1b[B\x1b[B \x1b[B x\r"); msg != "Columns saved." {
+	if msg := choose("\x1b[B \x1b[B\x1b[B\x1b[B \x1b[B x\r"); msg != "Columns saved." {
 		t.Fatalf("msg = %q", msg)
 	}
-	want := []string{"title", "folder", "size", "tokens", "id"}
+	want := []string{"pin", "title", "folder", "size", "tokens", "id"}
 	if !reflect.DeepEqual(columns, want) {
 		t.Fatalf("columns = %v, want %v", columns, want)
 	}
@@ -268,30 +268,45 @@ func TestColumns(t *testing.T) {
 	loadAll(list)
 	got := rows(list, columns)
 	wantRows := []string{
-		"★ first \t/w/app            292B  1k  aaaaaaaa-0000-4000-8000-000000000000",
-		"  second\t/w/longer-folder   71B      bbbbbbbb-0000-4000-8000-000000000000",
+		"★  first \t/w/app            292B  1k  aaaaaaaa-0000-4000-8000-000000000000",
+		"   second\t/w/longer-folder   71B      bbbbbbbb-0000-4000-8000-000000000000",
 	}
 	if !reflect.DeepEqual(got, wantRows) {
 		t.Fatalf("rows =\n%q\nwant\n%q", got, wantRows)
 	}
-	if got := rows(list, []string{"id"}); got[0] != "★ "+a.id {
+	if got := rows(list, []string{"pin", "id"}); got[0] != "★  "+a.id {
 		t.Fatalf("id only = %q", got)
+	}
+	if got := rows(list[1:], []string{"pin", "id"}); got[0] != b.id {
+		t.Fatalf("pin column without pinned sessions = %q", got)
 	}
 	if got := rows(list, []string{"date", "title"}); strings.HasSuffix(got[0], " ") || strings.Contains(got[0], "\t") {
 		t.Fatalf("left only = %q", got)
 	}
 
-	if msg := choose("\x1b[1;2A\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[1;2A\x1b[1;2A\x1b[1;2A\x1b[1;2A\x1b[1;2B\x1b[1;2A\r"); msg != "Columns saved." {
+	if msg := choose("\x1b[1;2A\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[1;2A\x1b[1;2A\x1b[1;2A\x1b[1;2A\x1b[1;2B\x1b[1;2A\r"); msg != "Columns saved." {
 		t.Fatalf("msg = %q", msg)
 	}
-	if want := []string{"id", "title", "folder", "size", "tokens"}; !reflect.DeepEqual(columns, want) {
+	if want := []string{"pin", "id", "title", "folder", "size", "tokens"}; !reflect.DeepEqual(columns, want) {
 		t.Fatalf("moved columns = %v, want %v", columns, want)
 	}
-	if got := rows(list, columns)[0]; got != "★ "+a.id+"  first \t/w/app            292B  1k" {
+	if got := rows(list, columns)[0]; got != "★  "+a.id+"  first \t/w/app            292B  1k" {
 		t.Fatalf("moved row = %q", got)
 	}
-	if got := rows(list, []string{"folder", "id"})[1]; got != "  /w/longer-folder  "+b.id {
+	if got := rows(list, []string{"folder", "id"})[1]; got != "/w/longer-folder  "+b.id {
 		t.Fatalf("no title row = %q", got)
+	}
+
+	if msg := choose("\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[1;2A\x1b[1;2A \r"); msg != "Columns saved." {
+		t.Fatalf("msg = %q", msg)
+	}
+	columns, layout = nil, allColumns
+	loadSettings()
+	if want := []string{"pin", "id", "title", "folder", "tokens"}; !reflect.DeepEqual(columns, want) {
+		t.Fatalf("hidden size columns = %v, want %v", columns, want)
+	}
+	if choose("\x1b[B\x1b[B\x1b[B \r"); !reflect.DeepEqual(columns, []string{"pin", "id", "size", "title", "folder", "tokens"}) {
+		t.Fatalf("size shown again at %v", columns)
 	}
 
 	for text, want := range map[string][]string{`{"columns":["id","bogus","date","id"]}`: {"id", "date"}, `{"columns":[]}`: nil, `not json`: {"x"}, `{}`: {"x"}} {

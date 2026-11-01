@@ -903,19 +903,19 @@ func pick(all []*session) {
 }
 
 func (t *tty) columns(shown []*session, hide bool) string {
-	order, sample := slices.Clone(columns), shown[:min(8, len(shown))]
-	on := slices.Clone(columns)
-	for k, c := range allColumns {
-		if !slices.Contains(order, c) {
+	list, sample := slices.Clone(columns), shown[:min(8, len(shown))]
+	on, ref := slices.Clone(columns), known(append(slices.Clone(layout), allColumns...))
+	for k, c := range ref {
+		if !slices.Contains(list, c) {
 			j := 0
 			if k > 0 {
-				j = slices.Index(order, allColumns[k-1]) + 1
+				j = slices.Index(list, ref[k-1]) + 1
 			}
-			order = slices.Insert(order, j, c)
+			list = slices.Insert(list, j, c)
 		}
 	}
 	chosen := func() []string {
-		return slices.DeleteFunc(slices.Clone(order), func(c string) bool { return !slices.Contains(on, c) })
+		return slices.DeleteFunc(slices.Clone(list), func(c string) bool { return !slices.Contains(on, c) })
 	}
 	c := &view{fixed: true, hide: hide, keys: map[string]bool{" ": true, "shift-up": true, "shift-down": true},
 		foot: "↑↓ select · SPACE show or hide · SHIFT-↑↓ move · ENTER save · ESC cancel"}
@@ -935,7 +935,7 @@ func (t *tty) columns(shown []*session, hide bool) string {
 	}
 	for {
 		c.items = c.items[:0]
-		for _, col := range order {
+		for _, col := range list {
 			box := "[ ] "
 			if slices.Contains(on, col) {
 				box = "[x] "
@@ -943,20 +943,23 @@ func (t *tty) columns(shown []*session, hide bool) string {
 			if col == "id" {
 				col = "session ID"
 			}
+			if col == "pin" {
+				col = "pin ★"
+			}
 			c.items = append(c.items, box+col)
 		}
 		k, i := t.run(c)
 		switch {
-		case k == " " && slices.Contains(on, order[i]):
-			on = slices.DeleteFunc(on, func(o string) bool { return o == order[i] })
+		case k == " " && slices.Contains(on, list[i]):
+			on = slices.DeleteFunc(on, func(o string) bool { return o == list[i] })
 		case k == " ":
-			on = append(on, order[i])
+			on = append(on, list[i])
 		case k == "shift-up" && i > 0:
-			order[i], order[i-1], c.sel = order[i-1], order[i], i-1
-		case k == "shift-down" && i < len(order)-1:
-			order[i], order[i+1], c.sel = order[i+1], order[i], i+1
+			list[i], list[i-1], c.sel = list[i-1], list[i], i-1
+		case k == "shift-down" && i < len(list)-1:
+			list[i], list[i+1], c.sel = list[i+1], list[i], i+1
 		case k == "enter":
-			columns = chosen()
+			columns, layout = chosen(), list
 			if err := saveSettings(); err != nil {
 				return "Columns changed for this run only: " + printable(err.Error())
 			}

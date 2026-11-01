@@ -4,7 +4,7 @@
 
 ### Added
 
-- `/columns` chooses which columns the list shows and in what order (#38). Every column can be hidden and moved with SHIFT-↑↓, and two new ones are available: size and tokens, the context size of the last reply in thousands. The choice is saved in `~/.claude-resume/settings.json` and also applies to `claude-resume -a`. Searching only matches the columns that are shown.
+- `/columns` chooses which columns the list shows and in what order (#38). Every column can be hidden and moved with SHIFT-↑↓, including the ★ of pinned sessions, and two new ones are available: size and tokens, the context size of the last reply in thousands. The choice is saved in `~/.claude-resume/settings.json` and also applies to `claude-resume -a`. Searching only matches the columns that are shown.
 
 ## [0.0.13-alpha] - 2026-10-31
 
