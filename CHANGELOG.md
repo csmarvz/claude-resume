@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Lines in the preview box wrap at the last space that fits instead of in the middle of a word (#35). A word wider than the box, such as a long path, is still cut.
+
 ## [0.0.14-alpha] - 2026-11-01
 
 ### Added
