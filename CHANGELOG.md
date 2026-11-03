@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `/restore-backup` completes paths as you type, shows recent ZIPs first with their date and size, and previews which sessions a backup contains (#40).
+
 ## [0.0.15-alpha] - 2026-11-01
 
 ### Added

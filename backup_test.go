@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -424,26 +425,119 @@ func TestBackupPickerPaths(t *testing.T) {
 	for _, action := range []string{"backup", "backup-all", "restore-backup"} {
 		t.Run(action, func(t *testing.T) {
 			dir := backupTestStores(t)
+			t.Chdir(dir)
 			s := backupTestSession(t, "live", "p", exportID, "picker")
 			file := filepath.Join(dir, "picker.zip")
+			input := "\x15" + file + "\r"
 			var selected *session
 			if action == "backup" {
 				selected = s
 			}
 			if action == "restore-backup" {
+				file = filepath.Join(dir, "backups", "picker.ZIP")
+				if err := os.Mkdir(filepath.Dir(file), 0o700); err != nil {
+					t.Fatal(err)
+				}
 				if err := backupWrite([]*session{s}, file, false); err != nil {
 					t.Fatal(err)
 				}
 				backupTestStores(t)
+				cwd, userHome := filepath.Join(dir, "cwd"), filepath.Join(dir, "home")
+				for _, folder := range []string{cwd, userHome} {
+					if err := os.Mkdir(folder, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Chdir(cwd)
+				t.Setenv("HOME", userHome)
+				t.Setenv("USERPROFILE", userHome)
+				input = "~/../back\r\r"
 			}
 			keys := make(chan []byte, 1)
-			out := &exportConfirmOutput{keys: keys, input: "\x15" + file + "\r"}
-			terminal := &tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}
+			keys <- []byte(input)
+			close(keys)
+			var out bytes.Buffer
+			terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
 			msg := terminal.backupDialog(action, selected)
 			if !strings.HasPrefix(msg, "Saved ") && !strings.HasPrefix(msg, "Restored 1") {
-				t.Fatal(msg)
+				t.Fatalf("%s; last screen: %q", msg, out.String()[max(0, out.Len()-1800):])
+			}
+			if action == "restore-backup" && !strings.Contains(out.String(), exportID) {
+				t.Fatal("selected backup session not shown in preview")
 			}
 		})
+	}
+}
+
+func TestBackupList(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"z-folder", "a-folder"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, name := range []string{"a-old.zip", ".hidden.zip", "z-new.ZIP", "unrelated.txt"} {
+		p := filepath.Join(dir, name)
+		backupTestWrite(t, p, "listing must not open the ZIP")
+		mod := time.Unix(int64(i+1)*3600, 0)
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := backupList(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if want := []string{"z-new.ZIP", ".hidden.zip", "a-old.zip", "a-folder", "z-folder"}; !slices.Equal(names, want) {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+}
+
+func TestBackupInputPath(t *testing.T) {
+	dir := backupTestStores(t)
+	cwd := filepath.Join(dir, "here")
+	if err := os.Mkdir(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	cases := map[string]string{
+		"":                        cwd,
+		"~/":                      dir,
+		"~":                       dir,
+		"../backup.zip":           filepath.Join(dir, "backup.zip"),
+		"~/a backup.zip":          filepath.Join(dir, "a backup.zip"),
+		filepath.Join(dir, "ZIP"): filepath.Join(dir, "ZIP"),
+	}
+	if runtime.GOOS == "windows" {
+		cases[`~\backup.zip`] = filepath.Join(dir, "backup.zip")
+		cases[`D:\`] = `D:\`
+	}
+	for input, want := range cases {
+		if got, err := backupInputPath(input); err != nil || got != want {
+			t.Errorf("%q: got %q, %v; want %q", input, got, err, want)
+		}
+	}
+}
+
+func TestBackupPickerTypedPath(t *testing.T) {
+	dir := backupTestStores(t)
+	t.Chdir(dir)
+	s := backupTestSession(t, "live", "p", exportID, "typed path")
+	if err := backupWrite([]*session{s}, "backup", false); err != nil {
+		t.Fatal(err)
+	}
+	backupTestStores(t)
+	keys := make(chan []byte, 1)
+	keys <- []byte("missing\r\x15backup\r")
+	close(keys)
+	var out bytes.Buffer
+	terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+	if msg := terminal.restoreBackupDialog(); !strings.HasPrefix(msg, "Restored 1") {
+		t.Fatalf("%s; last screen: %q", msg, out.String()[max(0, out.Len()-1800):])
 	}
 }
 

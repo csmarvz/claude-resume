@@ -381,13 +381,36 @@ func backupComponent(p string) bool {
 	return base != "CON" && base != "PRN" && base != "AUX" && base != "NUL" && !(len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '0' && base[3] <= '9')
 }
 
+func backupReadManifest(f *zip.File) (backupManifest, error) {
+	var m backupManifest
+	const limit = 16 << 20
+	if f == nil || f.UncompressedSize64 > limit || !f.Mode().IsRegular() {
+		return m, errors.New("missing or oversized backup manifest")
+	}
+	in, err := f.Open()
+	if err != nil {
+		return m, err
+	}
+	b, err := io.ReadAll(io.LimitReader(in, limit+1))
+	err = errors.Join(err, in.Close())
+	if err != nil || len(b) > limit {
+		return m, fmt.Errorf("cannot read backup manifest: %v", err)
+	}
+	if err := json.Unmarshal(b, &m); err != nil || m.Version != 1 || len(m.Sessions) == 0 {
+		return m, errors.New("invalid or unsupported backup manifest")
+	}
+	return m, nil
+}
+
 func backupStage(file string) (backupManifest, string, error) {
 	m := backupManifest{}
 	z, err := zip.OpenReader(file)
+	if z != nil {
+		defer z.Close()
+	}
 	if err != nil {
 		return m, "", err
 	}
-	defer z.Close()
 	entries := map[string]*zip.File{}
 	aliases := map[string]bool{}
 	for _, f := range z.File {
@@ -408,21 +431,9 @@ func backupStage(file string) (backupManifest, string, error) {
 		}
 		aliases[strings.ToLower(clean)], entries[f.Name] = true, f
 	}
-	f := entries["manifest.json"]
-	if f == nil || f.UncompressedSize64 > 16<<20 || !f.Mode().IsRegular() {
-		return m, "", errors.New("missing or oversized backup manifest")
-	}
-	in, err := f.Open()
+	m, err = backupReadManifest(entries["manifest.json"])
 	if err != nil {
 		return m, "", err
-	}
-	b, err := io.ReadAll(io.LimitReader(in, (16<<20)+1))
-	err = errors.Join(err, in.Close())
-	if err != nil || len(b) > 16<<20 {
-		return m, "", fmt.Errorf("cannot read backup manifest: %v", err)
-	}
-	if err := json.Unmarshal(b, &m); err != nil || m.Version != 1 || len(m.Sessions) == 0 {
-		return m, "", errors.New("invalid or unsupported backup manifest")
 	}
 	sessions := map[string]bool{}
 	for _, s := range m.Sessions {
@@ -984,27 +995,14 @@ func backupCLI(action, file string, ids []string) error {
 }
 
 func (t *tty) backupDialog(action string, selected *session) string {
-	suggested := backupName()
 	if action == "restore-backup" {
-		suggested = ""
+		return t.restoreBackupDialog()
 	}
-	v := &view{items: []string{"Session ZIP"}, edit: true, query: []rune(suggested), foot: "/" + action + " · Type the ZIP path · ENTER continue · ESC cancel"}
+	v := &view{items: []string{"Session ZIP"}, edit: true, query: []rune(backupName()), foot: "/" + action + " · Type the ZIP path · ENTER continue · ESC cancel"}
 	v.cur = len(v.query)
 	for {
 		if k, _ := t.run(v); k != "enter" {
 			return "Cancelled."
-		}
-		if action == "restore-backup" {
-			file := string(v.query)
-			if strings.TrimSpace(file) == "" {
-				v.header = []string{"Enter a ZIP path."}
-				continue
-			}
-			msg, err := backupRestore(file, func(lines []line) string { return backupChoose(t, lines) })
-			if err != nil {
-				return printable(msg + " " + err.Error())
-			}
-			return printable(msg)
 		}
 		all, err := backupPool()
 		if err != nil {
