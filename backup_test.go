@@ -478,7 +478,7 @@ func TestBackupPickerPaths(t *testing.T) {
 			}
 			output := out.String()
 			if action == "restore-backup" {
-				shortParent := "~/../backups" + string(os.PathSeparator) + ".." + string(os.PathSeparator)
+				shortParent := filepath.FromSlash("~/../")
 				for _, want := range []string{"❯ \x1b[0;1m" + shortParent, "Local session title · live", "Reading backup 4/4 files · 100%", "Restoring 1/1 sessions · 100%"} {
 					if !strings.Contains(output, want) {
 						t.Errorf("picker output missing %q", want)
@@ -512,6 +512,36 @@ func TestBackupPickerTabCompletesNewestZIPWithoutRestoring(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "❯ \x1b[0;1mz-newer.zip") {
 		t.Fatal("Tab did not fill the newest ZIP into the path field")
+	}
+}
+
+func TestBackupPickerCleansParentPath(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"old-backups/../", ""},
+		{"old-backups\t\r", ""},
+		{"old-backups\t\t", ""},
+		{"old-backups/../../", filepath.FromSlash("../")},
+		{"~//../", filepath.FromSlash("~/../")},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			dir := backupTestStores(t)
+			t.Chdir(dir)
+			backupTestWrite(t, filepath.Join(dir, "old-backups", "note.txt"), "folder marker")
+			keys := make(chan []byte, 1)
+			keys <- []byte(tc.input)
+			close(keys)
+			var out bytes.Buffer
+			terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+			if msg := terminal.restoreBackupDialog(nil); msg != "Cancelled." {
+				t.Fatal(msg)
+			}
+			const field = "❯ \x1b[0;1m"
+			screen := out.String()
+			i := strings.LastIndex(screen, field)
+			if i < 0 || !strings.HasPrefix(screen[i+len(field):], tc.want+"\x1b[0m") {
+				t.Fatalf("expected final path %q", tc.want)
+			}
+		})
 	}
 }
 

@@ -21,6 +21,33 @@ func backupInputPath(input string) (string, error) {
 	return filepath.Abs(input)
 }
 
+func cleanBackupFolder(input string) string {
+	separator := string(os.PathSeparator)
+	if input == "~" {
+		return "~" + separator
+	}
+	if len(input) >= 2 && input[0] == '~' && os.IsPathSeparator(input[1]) {
+		// Keep the home anchor when the relative part starts with "..".
+		start := 2
+		for start < len(input) && os.IsPathSeparator(input[start]) {
+			start++
+		}
+		relative := filepath.Clean(input[start:])
+		if relative == "." {
+			return "~" + separator
+		}
+		return "~" + separator + relative + separator
+	}
+	clean := filepath.Clean(input)
+	if clean == "." {
+		return ""
+	}
+	if !os.IsPathSeparator(clean[len(clean)-1]) {
+		clean += separator
+	}
+	return clean
+}
+
 func backupList(dir string) ([]os.FileInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -125,8 +152,16 @@ func (t *tty) restoreBackupDialog(sessions []*session) string {
 	var previewFile string
 	var previewLines []line
 	v.complete = func() {
+		input := string(v.query)
+		if len(input) > 0 && v.cur == len(v.query) && os.IsPathSeparator(input[len(input)-1]) {
+			if base := filepath.Base(input); base == "." || base == ".." {
+				input = cleanBackupFolder(input)
+				v.query = []rune(input)
+				v.cur = len(v.query)
+			}
+		}
 		var name string
-		prefix, name = filepath.Split(string(v.query))
+		prefix, name = filepath.Split(input)
 		if filepath.IsAbs(prefix) && !os.IsPathSeparator(prefix[len(prefix)-1]) {
 			prefix += string(os.PathSeparator)
 		}
@@ -223,8 +258,8 @@ func (t *tty) restoreBackupDialog(sessions []*session) string {
 			switch {
 			case err != nil:
 			case info.IsDir() || key == "tab" && info.Mode().IsRegular():
-				if info.IsDir() && !os.IsPathSeparator(input[len(input)-1]) {
-					input += string(os.PathSeparator)
+				if info.IsDir() {
+					input = cleanBackupFolder(input)
 				}
 				v.query = []rune(input)
 				v.cur = len(v.query)
