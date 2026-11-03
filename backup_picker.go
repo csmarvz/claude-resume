@@ -114,7 +114,7 @@ func backupPreview(file string, local map[[3]string]*session) ([]line, error) {
 }
 
 func (t *tty) restoreBackupDialog(sessions []*session) string {
-	v := &view{edit: true, foot: "Type path · ↑↓ select · ENTER open or restore · ESC cancel"}
+	v := &view{edit: true, foot: "↑↓ select · TAB complete · ENTER open/restore · ESC cancel"}
 	local := make(map[[3]string]*session)
 	for _, s := range sessions {
 		local[[3]string{root(s), folder(s), s.id}] = s
@@ -156,6 +156,7 @@ func (t *tty) restoreBackupDialog(sessions []*session) string {
 				v.sel = 1
 			}
 		}
+		newest := -1
 		for i, entry := range matches {
 			base := entry.Name()
 			if base == name {
@@ -165,9 +166,15 @@ func (t *tty) restoreBackupDialog(sessions []*session) string {
 			if entry.IsDir() {
 				label += string(os.PathSeparator)
 			} else {
+				if newest < 0 {
+					newest = i + offset
+				}
 				label += "\t" + entry.ModTime().Format("2006-01-02 15:04") + " · " + human(entry.Size()) + "B"
 			}
 			v.items = append(v.items, label)
+		}
+		if name == "" && newest >= 0 {
+			v.sel = newest
 		}
 	}
 	v.preview = func(i int) []line {
@@ -191,13 +198,13 @@ func (t *tty) restoreBackupDialog(sessions []*session) string {
 	v.complete()
 	for {
 		key, i := t.run(v)
-		if key != "enter" {
+		if key != "enter" && key != "tab" {
 			return "Cancelled."
 		}
 		input := string(v.query)
 		if i >= 0 {
 			if parent && i == 0 {
-				input = filepath.Dir(dir)
+				input = prefix + ".."
 			} else {
 				if parent {
 					i--
@@ -215,8 +222,8 @@ func (t *tty) restoreBackupDialog(sessions []*session) string {
 			info, err = os.Stat(file)
 			switch {
 			case err != nil:
-			case info.IsDir():
-				if !os.IsPathSeparator(input[len(input)-1]) {
+			case info.IsDir() || key == "tab" && info.Mode().IsRegular():
+				if info.IsDir() && !os.IsPathSeparator(input[len(input)-1]) {
 					input += string(os.PathSeparator)
 				}
 				v.query = []rune(input)

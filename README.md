@@ -77,7 +77,7 @@ Exports contain user prompts and Claude's text replies in order, without shorten
 
 `claude-resume --backup <zip> <id>...` backs up explicit IDs; omit the IDs to back up all live sessions. Ambiguous IDs are refused. ZIPs contain raw transcripts, subagent/tool-output files, file history, session environment data, and a versioned manifest recording category and pin state. They are different from readable Markdown exports. Pin reconciliation runs first and may recover missing live files; its errors stop the backup. Backup commands do not purge the trash.
 
-`/restore-backup` starts in the current working directory. Folders appear above the ZIPs, which are sorted newest first. Choose `..` to go up, or type a path such as `../` or `~/`. Completion ignores case. Type a leading dot to see dot-prefixed entries. The selected ZIP's preview shows each session's saved date, local title when available, and category. Enter opens a selected folder, restores a selected ZIP, or uses the typed path if there are no matches. Esc returns to the session picker.
+`/restore-backup` starts in the current working directory with the newest ZIP selected when one is available. Folders appear above ZIPs. Choose `..` to go up, or type a path such as `../` or `~/`. Completion ignores case. Type a leading dot to see dot-prefixed entries. The selected ZIP's preview shows each session's saved date, local title when available, and category. Tab completes the selected path and opens folders. Enter opens a selected folder, restores a selected ZIP, or uses the typed path if there are no matches. Esc returns to the session picker.
 
 Picker backup and restore commands show progress in the footer as they copy files and install sessions.
 

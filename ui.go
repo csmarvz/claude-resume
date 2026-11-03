@@ -103,7 +103,7 @@ var csi = map[string]string{
 
 var ctrl = map[byte]string{
 	0x00: "ctrl-space", 0x01: "ctrl-a", 0x02: "left", 0x03: "esc", 0x04: "ctrl-d", 0x05: "end", 0x06: "right",
-	0x08: "bs", 0x7f: "bs", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "ctrl-n", 0x10: "up",
+	0x08: "bs", 0x7f: "bs", 0x09: "tab", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "ctrl-n", 0x10: "up",
 	0x12: "ctrl-r", 0x14: "ctrl-t", 0x15: "ctrl-u", 0x17: "ctrl-w",
 }
 
@@ -226,6 +226,10 @@ func (t *tty) run(v *view) (string, int) {
 		case "ctrl-a", "ctrl-n":
 			if v.keys[k] {
 				return k, -1
+			}
+		case "tab":
+			if v.complete != nil && n > 0 {
+				return k, v.shown[v.sel]
 			}
 		case "enter", "ctrl-d", "ctrl-r", "ctrl-t":
 			if n > 0 && (k == "enter" || v.keys[k]) {

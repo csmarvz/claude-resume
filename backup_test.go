@@ -442,6 +442,15 @@ func TestBackupPickerPaths(t *testing.T) {
 				if err := backupWrite([]*session{s}, file, false, nil); err != nil {
 					t.Fatal(err)
 				}
+				older := filepath.Join(filepath.Dir(file), "a-older.zip")
+				backupTestWrite(t, older, "not a ZIP")
+				oldTime := time.Now().Add(-time.Hour)
+				if err := os.Chtimes(older, oldTime, oldTime); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(filepath.Join(filepath.Dir(file), "subfolder"), 0o700); err != nil {
+					t.Fatal(err)
+				}
 				backupTestStores(t)
 				cwd, userHome := filepath.Join(dir, "cwd"), filepath.Join(dir, "home")
 				for _, folder := range []string{cwd, userHome} {
@@ -456,7 +465,7 @@ func TestBackupPickerPaths(t *testing.T) {
 					{path: parts(config, "p", s.id)[0], id: s.id, title: "Local session title", loaded: true},
 					{path: parts(trash, "p", s.id)[0], id: s.id, title: "Old recovery title", loaded: true},
 				}
-				input = "~/../back\r\x1b[A\rback\r\r"
+				input = "~/../back\t\x1b[A\x1b[A\rback\t\x1b[A\x1b[A\tback\t\r"
 			}
 			keys := make(chan []byte, 1)
 			keys <- []byte(input)
@@ -469,7 +478,8 @@ func TestBackupPickerPaths(t *testing.T) {
 			}
 			output := out.String()
 			if action == "restore-backup" {
-				for _, want := range []string{"Local session title · live", "Reading backup 4/4 files · 100%", "Restoring 1/1 sessions · 100%"} {
+				shortParent := "~/../backups" + string(os.PathSeparator) + ".." + string(os.PathSeparator)
+				for _, want := range []string{"❯ \x1b[0;1m" + shortParent, "Local session title · live", "Reading backup 4/4 files · 100%", "Restoring 1/1 sessions · 100%"} {
 					if !strings.Contains(output, want) {
 						t.Errorf("picker output missing %q", want)
 					}
@@ -478,6 +488,30 @@ func TestBackupPickerPaths(t *testing.T) {
 				t.Fatal("backup progress not shown")
 			}
 		})
+	}
+}
+
+func TestBackupPickerTabCompletesNewestZIPWithoutRestoring(t *testing.T) {
+	dir := backupTestStores(t)
+	t.Chdir(dir)
+	backupTestWrite(t, filepath.Join(dir, "folder", "note.txt"), "folder marker")
+	old := filepath.Join(dir, "a-older.zip")
+	backupTestWrite(t, old, "older")
+	oldTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(old, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	backupTestWrite(t, filepath.Join(dir, "z-newer.zip"), "newer")
+	keys := make(chan []byte, 1)
+	keys <- []byte("\t")
+	close(keys)
+	var out bytes.Buffer
+	terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+	if msg := terminal.restoreBackupDialog(nil); msg != "Cancelled." {
+		t.Fatalf("Tab attempted to restore the ZIP: %s", msg)
+	}
+	if !strings.Contains(out.String(), "❯ \x1b[0;1mz-newer.zip") {
+		t.Fatal("Tab did not fill the newest ZIP into the path field")
 	}
 }
 
