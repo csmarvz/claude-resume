@@ -183,7 +183,15 @@ func backupAllowed(m backupManifest, name string) bool {
 	return false
 }
 
-func backupWrite(list []*session, destination string, overwrite bool) (err error) {
+type backupProgress func(action, unit string, done, total int)
+
+func (p backupProgress) report(action, unit string, done, total int) {
+	if p != nil {
+		p(action, unit, done, total)
+	}
+}
+
+func backupWrite(list []*session, destination string, overwrite bool, progress backupProgress) (err error) {
 	if len(list) == 0 {
 		return errors.New("no sessions selected")
 	}
@@ -228,6 +236,13 @@ func backupWrite(list []*session, destination string, overwrite bool) (err error
 	m := backupManifest{Version: 1}
 	seen := map[string]string{}
 	seenSessions := map[string]bool{}
+	type source struct {
+		path, store, name string
+		info              fs.FileInfo
+	}
+	var sources []source
+	total := 0
+	progress.report("Preparing backup", "", 0, 0)
 	for _, s := range list {
 		category := ""
 		for c, r := range backupStores() {
@@ -294,27 +309,48 @@ func backupWrite(list []*session, destination string, overwrite bool) (err error
 				if previous != nil && os.SameFile(previous, info) {
 					return errors.New("backup destination aliases session data")
 				}
-				h, err := zip.FileInfoHeader(info)
-				if err != nil {
-					return err
-				}
-				h.Name, h.Method = name, zip.Deflate
+				seen[key] = name
 				if info.IsDir() {
-					h.Name += "/"
+					name += "/"
+				} else {
+					total++
 				}
-				w, err := z.CreateHeader(h)
-				if err != nil {
-					return err
-				}
-				seen[key], m.Files = name, append(m.Files, h.Name)
-				if info.IsDir() {
-					return nil
-				}
-				return backupCopyFile(w, p, info)
+				sources = append(sources, source{p, root(s), name, info})
+				m.Files = append(m.Files, name)
+				return nil
 			})
 			if err != nil {
 				return err
 			}
+		}
+	}
+	progress.report("Backing up", "files", 0, total)
+	done := 0
+	for _, src := range sources {
+		if err := backupNoLinks(src.path, src.store); err != nil {
+			return err
+		}
+		if src.info.IsDir() {
+			now, err := os.Lstat(src.path)
+			if err != nil || !now.IsDir() || !os.SameFile(src.info, now) {
+				return fmt.Errorf("session directory changed before copying: %s", src.path)
+			}
+		}
+		h, err := zip.FileInfoHeader(src.info)
+		if err != nil {
+			return err
+		}
+		h.Name, h.Method = src.name, zip.Deflate
+		w, err := z.CreateHeader(h)
+		if err != nil {
+			return err
+		}
+		if !src.info.IsDir() {
+			if err := backupCopyFile(w, src.path, src.info); err != nil {
+				return err
+			}
+			done++
+			progress.report("Backing up", "files", done, total)
 		}
 	}
 	w, err := z.Create("manifest.json")
@@ -402,7 +438,7 @@ func backupReadManifest(f *zip.File) (backupManifest, error) {
 	return m, nil
 }
 
-func backupStage(file string) (backupManifest, string, error) {
+func backupStage(file string, progress backupProgress) (backupManifest, string, error) {
 	m := backupManifest{}
 	z, err := zip.OpenReader(file)
 	if z != nil {
@@ -447,11 +483,15 @@ func backupStage(file string) (backupManifest, string, error) {
 		}
 	}
 	wanted := map[string]bool{"manifest.json": true}
+	total := 0
 	for _, name := range m.Files {
 		if wanted[name] || entries[name] == nil || !backupAllowed(m, name) {
 			return m, "", fmt.Errorf("invalid backup inventory: %q", name)
 		}
 		wanted[name] = true
+		if !entries[name].Mode().IsDir() {
+			total++
+		}
 	}
 	if len(wanted) != len(entries) {
 		return m, "", errors.New("ZIP contains undeclared data")
@@ -470,6 +510,8 @@ func backupStage(file string) (backupManifest, string, error) {
 			return err
 		}
 		defer r.Close()
+		progress.report("Reading backup", "files", 0, total)
+		done := 0
 		for _, name := range m.Files {
 			f := entries[name]
 			native := filepath.FromSlash(strings.TrimSuffix(name, "/"))
@@ -498,6 +540,8 @@ func backupStage(file string) (backupManifest, string, error) {
 			if err := r.Chtimes(native, f.Modified, f.Modified); err != nil {
 				return err
 			}
+			done++
+			progress.report("Reading backup", "files", done, total)
 		}
 		return nil
 	}()
@@ -547,7 +591,8 @@ func backupSummary(s *session) ([]line, error) {
 }
 
 // choose returns overwrite, skip, or cancel; all decisions are collected before installation.
-func backupRestore(file string, choose func([]line) string) (string, error) {
+func backupRestore(file string, choose func([]line) string, progress backupProgress) (string, error) {
+	progress.report("Preparing restore", "", 0, 0)
 	if err := backupNoLinks(file, filepath.Dir(file)); err != nil {
 		return "", err
 	}
@@ -555,11 +600,12 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m, stage, err := backupStage(file)
+	m, stage, err := backupStage(file, progress)
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(stage)
+	progress.report("Checking restore conflicts", "", 0, 0)
 	type job struct {
 		entry backupSession
 		old   *session
@@ -730,7 +776,8 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 	if err != nil {
 		return result(), err
 	}
-	for _, j := range jobs {
+	for i, j := range jobs {
+		progress.report("Restoring", "sessions", i, len(jobs))
 		s, r := j.entry, stores[j.entry.Category]
 		for _, p := range parts(r, s.Project, s.ID) {
 			if err := backupNoLinks(p, r); err != nil {
@@ -801,6 +848,9 @@ func backupRestore(file string, choose func([]line) string) (string, error) {
 		if s.Pinned {
 			inventory[pinned][s.ID] = []*session{{path: parts(pinned, s.Project, s.ID)[0], id: s.ID}}
 		}
+	}
+	if len(jobs) > 0 {
+		progress.report("Restoring", "sessions", len(jobs), len(jobs))
 	}
 	return result(), nil
 }
@@ -930,7 +980,7 @@ func backupCLI(action, file string, ids []string) error {
 				t = openTTY()
 			}
 			return backupChoose(t, lines)
-		})
+		}, nil)
 		if t != nil {
 			t.close()
 			t = nil
@@ -976,7 +1026,7 @@ func backupCLI(action, file string, ids []string) error {
 	if err != nil {
 		return err
 	}
-	err = backupWrite(list, file, false)
+	err = backupWrite(list, file, false, nil)
 	if errors.Is(err, fs.ErrExist) && interactive {
 		t := openTTY()
 		confirmed := t.confirmDialog("Backup sessions", []line{{"1", "Overwrite this backup?"}, {"", printable(file)}})
@@ -984,7 +1034,7 @@ func backupCLI(action, file string, ids []string) error {
 		if !confirmed {
 			return errors.New("cancelled, nothing was backed up")
 		}
-		err = backupWrite(list, file, true)
+		err = backupWrite(list, file, true, nil)
 	} else if errors.Is(err, fs.ErrExist) {
 		return errors.New("overwriting a backup needs a terminal to confirm")
 	}
@@ -994,9 +1044,27 @@ func backupCLI(action, file string, ids []string) error {
 	return err
 }
 
-func (t *tty) backupDialog(action string, selected *session) string {
+func (t *tty) backupProgress(v *view) backupProgress {
+	screen := &view{header: v.header, query: v.query, cur: v.cur}
+	var last time.Time
+	var phase string
+	return func(action, unit string, done, total int) {
+		now := time.Now()
+		if action == phase && done != total && now.Sub(last) < 100*time.Millisecond {
+			return
+		}
+		phase, last = action, now
+		screen.foot = action + "…"
+		if total > 0 {
+			screen.foot = fmt.Sprintf("%s %d/%d %s · %d%%", action, done, total, unit, 100*done/total)
+		}
+		t.draw(screen)
+	}
+}
+
+func (t *tty) backupDialog(action string, selected *session, local []*session) string {
 	if action == "restore-backup" {
-		return t.restoreBackupDialog()
+		return t.restoreBackupDialog(local)
 	}
 	v := &view{items: []string{"Session ZIP"}, edit: true, query: []rune(backupName()), foot: "/" + action + " · Type the ZIP path · ENTER continue · ESC cancel"}
 	v.cur = len(v.query)
@@ -1023,9 +1091,9 @@ func (t *tty) backupDialog(action string, selected *session) string {
 		}
 		file, err := backupPath(string(v.query))
 		if err == nil {
-			err = backupWrite(list, file, false)
+			err = backupWrite(list, file, false, t.backupProgress(v))
 			if errors.Is(err, fs.ErrExist) && t.confirmDialog("Backup sessions", []line{{"1", "Overwrite this backup?"}, {"", printable(file)}}) {
-				err = backupWrite(list, file, true)
+				err = backupWrite(list, file, true, t.backupProgress(v))
 			}
 		}
 		if err != nil {

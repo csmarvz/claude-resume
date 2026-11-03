@@ -745,7 +745,11 @@ func pick(all []*session) {
 			if k == "backup" {
 				selected = shown[i]
 			}
-			msg = t.backupDialog(k, selected)
+			var local []*session
+			if k == "restore-backup" {
+				local = slices.Concat(all, arch, bin)
+			}
+			msg = t.backupDialog(k, selected, local)
 			all, arch, bin = scan(projects), scan(filepath.Join(archived, "projects")), scan(filepath.Join(trash, "projects"))
 			keep(all)
 			order(all)

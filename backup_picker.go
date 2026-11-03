@@ -49,9 +49,9 @@ func backupList(dir string) ([]os.FileInfo, error) {
 	slices.SortStableFunc(matches, func(a, b os.FileInfo) int {
 		if a.IsDir() != b.IsDir() {
 			if a.IsDir() {
-				return 1
+				return -1
 			}
-			return -1
+			return 1
 		}
 		if !a.IsDir() {
 			if order := b.ModTime().Compare(a.ModTime()); order != 0 {
@@ -63,7 +63,19 @@ func backupList(dir string) ([]os.FileInfo, error) {
 	return matches, nil
 }
 
-func backupPreview(file string) ([]line, error) {
+func backupMatches(entries []os.FileInfo, prefix string) []os.FileInfo {
+	folded := strings.ToLower(prefix)
+	var matches []os.FileInfo
+	for _, entry := range entries {
+		name := entry.Name()
+		if (!strings.HasPrefix(name, ".") || strings.HasPrefix(prefix, ".")) && strings.HasPrefix(strings.ToLower(name), folded) {
+			matches = append(matches, entry)
+		}
+	}
+	return matches
+}
+
+func backupPreview(file string, local map[[3]string]*session) ([]line, error) {
 	info, err := os.Lstat(file)
 	if err != nil {
 		return nil, err
@@ -90,16 +102,26 @@ func backupPreview(file string) ([]line, error) {
 		return nil, err
 	}
 	out := []line{{"1", fmt.Sprintf("Sessions in backup: %d", len(m.Sessions))}}
+	stores := backupStores()
 	for _, s := range m.Sessions {
-		out = append(out, line{"", printable(s.Category + " · " + s.Project + " · " + s.ID)})
+		title := s.ID
+		if existing := local[[3]string{stores[s.Category], s.Project, s.ID}]; existing != nil {
+			title = name(existing)
+		}
+		out = append(out, line{"", printable(s.Modified.Local().Format("2006-01-02 15:04") + " · " + title + " · " + s.Category)})
 	}
 	return out, nil
 }
 
-func (t *tty) restoreBackupDialog() string {
+func (t *tty) restoreBackupDialog(sessions []*session) string {
 	v := &view{edit: true, foot: "Type path · ↑↓ select · ENTER open or restore · ESC cancel"}
+	local := make(map[[3]string]*session)
+	for _, s := range sessions {
+		local[[3]string{root(s), folder(s), s.id}] = s
+	}
 	var dir, loadedDir, prefix string
 	var entries, matches []os.FileInfo
+	var parent bool
 	var previewFile string
 	var previewLines []line
 	v.complete = func() {
@@ -110,9 +132,9 @@ func (t *tty) restoreBackupDialog() string {
 		}
 		var err error
 		dir, err = backupInputPath(prefix)
-		v.header = []string{"Restore backup · " + printable(dir)}
+		v.header = []string{"Restore backup · " + strings.ReplaceAll(printable(homePath(dir)), "\n", " ")}
 		v.items = v.items[:0]
-		matches = matches[:0]
+		matches, parent = nil, false
 		if err == nil && loadedDir != dir {
 			entries, err = backupList(dir)
 			loadedDir = ""
@@ -124,22 +146,21 @@ func (t *tty) restoreBackupDialog() string {
 			v.header = append(v.header, printable(err.Error()))
 			return
 		}
-		for _, entry := range entries {
+		matches = backupMatches(entries, name)
+		parent = name == "" && filepath.Dir(dir) != dir
+		offset := 0
+		if parent {
+			v.items = append(v.items, "..")
+			offset = 1
+			if len(matches) > 0 {
+				v.sel = 1
+			}
+		}
+		for i, entry := range matches {
 			base := entry.Name()
-			if strings.HasPrefix(base, ".") && !strings.HasPrefix(name, ".") {
-				continue
-			}
-			match := strings.HasPrefix(base, name)
-			if runtime.GOOS == "windows" {
-				match = strings.HasPrefix(strings.ToLower(base), strings.ToLower(name))
-			}
-			if !match {
-				continue
-			}
 			if base == name {
-				v.sel = len(matches)
+				v.sel = i + offset
 			}
-			matches = append(matches, entry)
 			label := printable(base)
 			if entry.IsDir() {
 				label += string(os.PathSeparator)
@@ -150,6 +171,9 @@ func (t *tty) restoreBackupDialog() string {
 		}
 	}
 	v.preview = func(i int) []line {
+		if parent {
+			i--
+		}
 		if i < 0 || matches[i].IsDir() {
 			return nil
 		}
@@ -157,7 +181,7 @@ func (t *tty) restoreBackupDialog() string {
 		if file != previewFile {
 			previewFile = file
 			var err error
-			previewLines, err = backupPreview(file)
+			previewLines, err = backupPreview(file, local)
 			if err != nil {
 				previewLines = []line{{red, printable(err.Error())}}
 			}
@@ -172,7 +196,14 @@ func (t *tty) restoreBackupDialog() string {
 		}
 		input := string(v.query)
 		if i >= 0 {
-			input = prefix + matches[i].Name()
+			if parent && i == 0 {
+				input = filepath.Dir(dir)
+			} else {
+				if parent {
+					i--
+				}
+				input = prefix + matches[i].Name()
+			}
 		}
 		if input == "" {
 			v.header = append(v.header[:1], "Enter a ZIP path.")
@@ -201,7 +232,7 @@ func (t *tty) restoreBackupDialog() string {
 			v.header = append(v.header[:1], printable(err.Error()))
 			continue
 		}
-		msg, err := backupRestore(file, func(lines []line) string { return backupChoose(t, lines) })
+		msg, err := backupRestore(file, func(lines []line) string { return backupChoose(t, lines) }, t.backupProgress(v))
 		if err != nil {
 			return printable(msg + " " + err.Error())
 		}

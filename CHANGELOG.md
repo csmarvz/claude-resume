@@ -4,7 +4,7 @@
 
 ### Changed
 
-- `/restore-backup` completes paths as you type, shows recent ZIPs first with their date and size, and previews which sessions a backup contains (#40).
+- `/restore-backup` completes paths as you type, shows folders followed by newest ZIPs with their date and size, and previews sessions by date, title or ID, and category. Picker backup and restore commands show progress (#40).
 
 ## [0.0.15-alpha] - 2026-11-01
 
