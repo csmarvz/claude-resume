@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `/restore-backup` completes paths as you type or when you press Tab. It lists folders before ZIPs, selects the newest ZIP by default, and previews sessions by date, title or ID, and category. Picker backup and restore commands show progress (#40).
+
 ## [0.0.15-alpha] - 2026-11-01
 
 ### Added

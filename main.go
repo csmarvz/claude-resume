@@ -584,12 +584,14 @@ func mustFind(all []*session, prefix string) *session {
 	return s
 }
 
-func tilde(p string) string {
+func homePath(p string) string {
 	if home != "" && (p == home || strings.HasPrefix(p, home+string(filepath.Separator))) {
 		p = "~" + p[len(home):]
 	}
-	return squeeze(p)
+	return p
 }
+
+func tilde(p string) string { return squeeze(homePath(p)) }
 
 func date(s *session) string { return s.mod.Format("2006-01-02 15:04") }
 

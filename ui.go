@@ -103,7 +103,7 @@ var csi = map[string]string{
 
 var ctrl = map[byte]string{
 	0x00: "ctrl-space", 0x01: "ctrl-a", 0x02: "left", 0x03: "esc", 0x04: "ctrl-d", 0x05: "end", 0x06: "right",
-	0x08: "bs", 0x7f: "bs", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "ctrl-n", 0x10: "up",
+	0x08: "bs", 0x7f: "bs", 0x09: "tab", 0x0a: "down", 0x0b: "up", 0x0d: "enter", 0x0e: "ctrl-n", 0x10: "up",
 	0x12: "ctrl-r", 0x14: "ctrl-t", 0x15: "ctrl-u", 0x17: "ctrl-w",
 }
 
@@ -163,15 +163,16 @@ func (t *tty) read() string {
 }
 
 type view struct {
-	items   []string
-	bold    map[int]bool
-	header  []string
-	foot    string
-	preview func(i int) []line
-	keys    map[string]bool
-	edit    bool
-	fixed   bool
-	warn    string
+	items    []string
+	bold     map[int]bool
+	header   []string
+	foot     string
+	preview  func(i int) []line
+	complete func()
+	keys     map[string]bool
+	edit     bool
+	fixed    bool
+	warn     string
 
 	query     []rune
 	cur       int
@@ -226,9 +227,16 @@ func (t *tty) run(v *view) (string, int) {
 			if v.keys[k] {
 				return k, -1
 			}
+		case "tab":
+			if v.complete != nil && n > 0 {
+				return k, v.shown[v.sel]
+			}
 		case "enter", "ctrl-d", "ctrl-r", "ctrl-t":
 			if n > 0 && (k == "enter" || v.keys[k]) {
 				return k, v.shown[v.sel]
+			}
+			if k == "enter" && v.complete != nil {
+				return k, -1
 			}
 		case "up":
 			v.dim = v.sel > 0
@@ -300,6 +308,9 @@ func (t *tty) run(v *view) (string, int) {
 		}
 		if edited {
 			v.dim, v.sel, v.top, v.pscroll = false, 0, 0, 0
+			if v.complete != nil {
+				v.complete()
+			}
 			v.filter()
 		}
 	}
@@ -738,7 +749,11 @@ func pick(all []*session) {
 			if k == "backup" {
 				selected = shown[i]
 			}
-			msg = t.backupDialog(k, selected)
+			var local []*session
+			if k == "restore-backup" {
+				local = slices.Concat(all, arch, bin)
+			}
+			msg = t.backupDialog(k, selected, local)
 			all, arch, bin = scan(projects), scan(filepath.Join(archived, "projects")), scan(filepath.Join(trash, "projects"))
 			keep(all)
 			order(all)

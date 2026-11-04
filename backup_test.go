@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,11 +83,11 @@ func TestBackupRoundTrip(t *testing.T) {
 		list = append(list, s)
 	}
 	zipPath := filepath.Join(dir, "backup.zip")
-	if err := backupWrite(list, zipPath, false); err != nil {
+	if err := backupWrite(list, zipPath, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	backupTestStores(t)
-	msg, err := backupRestore(zipPath, func([]line) string { t.Fatal("unexpected conflict"); return "cancel" })
+	msg, err := backupRestore(zipPath, func([]line) string { t.Fatal("unexpected conflict"); return "cancel" }, nil)
 	if err != nil || !strings.Contains(msg, "Restored 4 sessions; skipped 0.") {
 		t.Fatal(msg, err)
 	}
@@ -123,7 +124,7 @@ func TestBackupOverwrite(t *testing.T) {
 			dir := backupTestStores(t)
 			s := backupTestSession(t, "live", "project", exportID, "incoming")
 			zipPath := filepath.Join(dir, "backup.zip")
-			if err := backupWrite([]*session{s}, zipPath, false); err != nil {
+			if err := backupWrite([]*session{s}, zipPath, false, nil); err != nil {
 				t.Fatal(err)
 			}
 			backupTestWrite(t, s.path, "original")
@@ -149,7 +150,7 @@ func TestBackupOverwrite(t *testing.T) {
 					return "overwrite"
 				}
 				return action
-			})
+			}, nil)
 			switch action {
 			case "overwrite":
 				if err != nil || !called || backupTestRead(t, s.path) != "incoming" || backupTestRead(t, parts(trash, "project", exportID)[0]) != "original" {
@@ -158,7 +159,7 @@ func TestBackupOverwrite(t *testing.T) {
 				if _, err := os.Stat(filepath.Join(strings.TrimSuffix(s.path, ".jsonl"), "obsolete")); !errors.Is(err, fs.ErrNotExist) {
 					t.Fatal("old files merged into restored session")
 				}
-				msg, err = backupRestore(zipPath, func([]line) string { t.Fatal("trash collision prompted overwrite"); return "overwrite" })
+				msg, err = backupRestore(zipPath, func([]line) string { t.Fatal("trash collision prompted overwrite"); return "overwrite" }, nil)
 				if err != nil || !strings.Contains(msg, "trash") || backupTestRead(t, parts(trash, "project", exportID)[0]) != "original" {
 					t.Fatal("repeated overwrite lost recovery", msg, err)
 				}
@@ -216,14 +217,14 @@ func TestBackupDuplicateIDs(t *testing.T) {
 				list = append(list, backupTestSession(t, "live", "b", exportID, "new"))
 			}
 			file := filepath.Join(dir, "backup.zip")
-			if err := backupWrite(list, file, false); err != nil {
+			if err := backupWrite(list, file, false, nil); err != nil {
 				t.Fatal(err)
 			}
 			backupTestStores(t)
 			if !inZip {
 				backupTestSession(t, "live", "b", exportID, "untouched")
 			}
-			msg, err := backupRestore(file, func([]line) string { t.Fatal("ambiguous session prompted"); return "overwrite" })
+			msg, err := backupRestore(file, func([]line) string { t.Fatal("ambiguous session prompted"); return "overwrite" }, nil)
 			if err != nil || !strings.Contains(msg, "duplicate ID") || !strings.Contains(msg, "Restored 0") {
 				t.Fatal(msg, err)
 			}
@@ -280,7 +281,7 @@ func TestBackupInvalidZIP(t *testing.T) {
 			m := backupManifest{Version: 1, Sessions: []backupSession{{Category: "live", Project: "p", ID: exportID, Modified: time.Now()}}, Files: []string{name}}
 			file := filepath.Join(dir, "bad.zip")
 			backupTestZip(t, file, m, tc.name, tc.mode)
-			if _, _, err := backupStage(file); err == nil {
+			if _, _, err := backupStage(file, nil); err == nil {
 				t.Fatal("unsafe ZIP accepted")
 			}
 			if _, err := os.Stat(config); !errors.Is(err, fs.ErrNotExist) {
@@ -292,7 +293,7 @@ func TestBackupInvalidZIP(t *testing.T) {
 		m := backupManifest{Version: version, Sessions: []backupSession{{Category: "live", Project: "p", ID: exportID, Modified: time.Now()}}, Files: []string{name}}
 		file := filepath.Join(dir, "bad.zip")
 		backupTestZip(t, file, m, "", 0)
-		if _, _, err := backupStage(file); err == nil {
+		if _, _, err := backupStage(file, nil); err == nil {
 			t.Fatal("unsupported version accepted")
 		}
 	}
@@ -305,7 +306,7 @@ func TestBackupInvalidZIP(t *testing.T) {
 	if err := os.WriteFile(file, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := backupStage(file); err == nil {
+	if _, _, err := backupStage(file, nil); err == nil {
 		t.Fatal("bad CRC accepted")
 	}
 }
@@ -315,23 +316,23 @@ func TestBackupPublicationAndAliases(t *testing.T) {
 	s := backupTestSession(t, "live", "p", exportID, "original")
 	file := filepath.Join(dir, "old.zip")
 	backupTestWrite(t, file, "previous")
-	if err := backupWrite([]*session{s}, file, false); !errors.Is(err, fs.ErrExist) {
+	if err := backupWrite([]*session{s}, file, false, nil); !errors.Is(err, fs.ErrExist) {
 		t.Fatal(err)
 	}
-	if err := backupWrite([]*session{s}, s.path, true); err == nil || backupTestRead(t, s.path) != "original" {
+	if err := backupWrite([]*session{s}, s.path, true, nil); err == nil || backupTestRead(t, s.path) != "original" {
 		t.Fatal("source overwritten", err)
 	}
 	alias := filepath.Join(dir, "alias.zip")
 	if err := os.Link(s.path, alias); err != nil {
 		t.Fatal(err)
 	}
-	if err := backupWrite([]*session{s}, alias, true); err == nil || backupTestRead(t, s.path) != "original" {
+	if err := backupWrite([]*session{s}, alias, true, nil); err == nil || backupTestRead(t, s.path) != "original" {
 		t.Fatal("source hard-link overwritten", err)
 	}
 	if err := os.Remove(s.path); err != nil {
 		t.Fatal(err)
 	}
-	if err := backupWrite([]*session{s}, file, true); err == nil || backupTestRead(t, file) != "previous" {
+	if err := backupWrite([]*session{s}, file, true, nil); err == nil || backupTestRead(t, file) != "previous" {
 		t.Fatal("failed output replaced previous ZIP", err)
 	}
 	matches, _ := filepath.Glob(filepath.Join(dir, ".claude-resume-backup-*"))
@@ -369,11 +370,11 @@ func TestBackupRunningPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(dir, "backup.zip")
-	if err := backupWrite([]*session{s}, file, false); err != nil {
+	if err := backupWrite([]*session{s}, file, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	backupTestWrite(t, filepath.Join(config, "sessions", fmt.Sprint(cmd.Process.Pid)+".json"), fmt.Sprintf(`{"sessionId":%q}`, exportID))
-	if _, err := backupRestore(file, func([]line) string { t.Fatal("running destination prompted"); return "overwrite" }); err == nil {
+	if _, err := backupRestore(file, func([]line) string { t.Fatal("running destination prompted"); return "overwrite" }, nil); err == nil {
 		t.Fatal("running destination allowed")
 	}
 }
@@ -424,26 +425,228 @@ func TestBackupPickerPaths(t *testing.T) {
 	for _, action := range []string{"backup", "backup-all", "restore-backup"} {
 		t.Run(action, func(t *testing.T) {
 			dir := backupTestStores(t)
+			t.Chdir(dir)
 			s := backupTestSession(t, "live", "p", exportID, "picker")
 			file := filepath.Join(dir, "picker.zip")
+			input := "\x15" + file + "\r"
 			var selected *session
+			var local []*session
 			if action == "backup" {
 				selected = s
 			}
 			if action == "restore-backup" {
-				if err := backupWrite([]*session{s}, file, false); err != nil {
+				file = filepath.Join(dir, "backups", "picker.ZIP")
+				if err := os.Mkdir(filepath.Dir(file), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := backupWrite([]*session{s}, file, false, nil); err != nil {
+					t.Fatal(err)
+				}
+				older := filepath.Join(filepath.Dir(file), "a-older.zip")
+				backupTestWrite(t, older, "not a ZIP")
+				oldTime := time.Now().Add(-time.Hour)
+				if err := os.Chtimes(older, oldTime, oldTime); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(filepath.Join(filepath.Dir(file), "subfolder"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 				backupTestStores(t)
+				cwd, userHome := filepath.Join(dir, "cwd"), filepath.Join(dir, "home")
+				for _, folder := range []string{cwd, userHome} {
+					if err := os.Mkdir(folder, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Chdir(cwd)
+				t.Setenv("HOME", userHome)
+				t.Setenv("USERPROFILE", userHome)
+				local = []*session{
+					{path: parts(config, "p", s.id)[0], id: s.id, title: "Local session title", loaded: true},
+					{path: parts(trash, "p", s.id)[0], id: s.id, title: "Old recovery title", loaded: true},
+				}
+				input = "~/../back\t\x1b[A\x1b[A\rback\t\x1b[A\x1b[A\tback\t\r"
 			}
 			keys := make(chan []byte, 1)
-			out := &exportConfirmOutput{keys: keys, input: "\x15" + file + "\r"}
-			terminal := &tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}
-			msg := terminal.backupDialog(action, selected)
+			keys <- []byte(input)
+			close(keys)
+			var out bytes.Buffer
+			terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+			msg := terminal.backupDialog(action, selected, local)
 			if !strings.HasPrefix(msg, "Saved ") && !strings.HasPrefix(msg, "Restored 1") {
-				t.Fatal(msg)
+				t.Fatalf("%s; last screen: %q", msg, out.String()[max(0, out.Len()-1800):])
+			}
+			output := out.String()
+			if action == "restore-backup" {
+				shortParent := filepath.FromSlash("~/../")
+				for _, want := range []string{"❯ \x1b[0;1m" + shortParent, "Local session title · live", "Reading backup 4/4 files · 100%", "Restoring 1/1 sessions · 100%"} {
+					if !strings.Contains(output, want) {
+						t.Errorf("picker output missing %q", want)
+					}
+				}
+			} else if !strings.Contains(output, "Backing up 4/4 files · 100%") {
+				t.Fatal("backup progress not shown")
 			}
 		})
+	}
+}
+
+func TestBackupPickerTabCompletesNewestZIPWithoutRestoring(t *testing.T) {
+	dir := backupTestStores(t)
+	t.Chdir(dir)
+	backupTestWrite(t, filepath.Join(dir, "folder", "note.txt"), "folder marker")
+	old := filepath.Join(dir, "a-older.zip")
+	backupTestWrite(t, old, "older")
+	oldTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(old, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	backupTestWrite(t, filepath.Join(dir, "z-newer.zip"), "newer")
+	keys := make(chan []byte, 1)
+	keys <- []byte("\t")
+	close(keys)
+	var out bytes.Buffer
+	terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+	if msg := terminal.restoreBackupDialog(nil); msg != "Cancelled." {
+		t.Fatalf("Tab attempted to restore the ZIP: %s", msg)
+	}
+	if !strings.Contains(out.String(), "❯ \x1b[0;1mz-newer.zip") {
+		t.Fatal("Tab did not fill the newest ZIP into the path field")
+	}
+}
+
+func TestBackupPickerCleansParentPath(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"old-backups/../", ""},
+		{"old-backups\t\r", ""},
+		{"old-backups\t\t", ""},
+		{"old-backups/../../", filepath.FromSlash("../")},
+		{"~//../", filepath.FromSlash("~/../")},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			dir := backupTestStores(t)
+			t.Chdir(dir)
+			backupTestWrite(t, filepath.Join(dir, "old-backups", "note.txt"), "folder marker")
+			keys := make(chan []byte, 1)
+			keys <- []byte(tc.input)
+			close(keys)
+			var out bytes.Buffer
+			terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+			if msg := terminal.restoreBackupDialog(nil); msg != "Cancelled." {
+				t.Fatal(msg)
+			}
+			const field = "❯ \x1b[0;1m"
+			screen := out.String()
+			i := strings.LastIndex(screen, field)
+			if i < 0 || !strings.HasPrefix(screen[i+len(field):], tc.want+"\x1b[0m") {
+				t.Fatalf("expected final path %q", tc.want)
+			}
+		})
+	}
+}
+
+func TestBackupList(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"z-folder", "a-folder"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, name := range []string{"a-old.zip", ".hidden.zip", "z-new.ZIP", "unrelated.txt"} {
+		p := filepath.Join(dir, name)
+		backupTestWrite(t, p, "listing must not open the ZIP")
+		mod := time.Unix(int64(i+1)*3600, 0)
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := backupList(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if want := []string{"a-folder", "z-folder", "z-new.ZIP", ".hidden.zip", "a-old.zip"}; !slices.Equal(names, want) {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+	for prefix, want := range map[string][]string{
+		"":    {"a-folder", "z-folder", "z-new.ZIP", "a-old.zip"},
+		".":   {".hidden.zip"},
+		"A-F": {"a-folder"},
+	} {
+		var got []string
+		for _, entry := range backupMatches(entries, prefix) {
+			got = append(got, entry.Name())
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%q matched %v, want %v", prefix, got, want)
+		}
+	}
+}
+
+func TestBackupRejectsRemovedDirectoryAfterInventory(t *testing.T) {
+	dir := backupTestStores(t)
+	s := backupTestSession(t, "live", "p", exportID, "test")
+	empty := filepath.Join(strings.TrimSuffix(s.path, ".jsonl"), "empty")
+	out := filepath.Join(dir, "backup.zip")
+	err := backupWrite([]*session{s}, out, false, func(action, _ string, done, total int) {
+		if action == "Backing up" && done == 0 && total > 0 {
+			if err := os.Remove(empty); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	if err == nil || !strings.Contains(err.Error(), "session directory changed before copying") {
+		t.Fatalf("expected directory change error, got %v", err)
+	}
+	if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("backup published after directory change: %v", err)
+	}
+}
+
+func TestBackupInputPath(t *testing.T) {
+	dir := backupTestStores(t)
+	cwd := filepath.Join(dir, "here")
+	if err := os.Mkdir(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	cases := map[string]string{
+		"":                        cwd,
+		"~/":                      dir,
+		"~":                       dir,
+		"../backup.zip":           filepath.Join(dir, "backup.zip"),
+		"~/a backup.zip":          filepath.Join(dir, "a backup.zip"),
+		filepath.Join(dir, "ZIP"): filepath.Join(dir, "ZIP"),
+	}
+	if runtime.GOOS == "windows" {
+		cases[`~\backup.zip`] = filepath.Join(dir, "backup.zip")
+		cases[`D:\`] = `D:\`
+	}
+	for input, want := range cases {
+		if got, err := backupInputPath(input); err != nil || got != want {
+			t.Errorf("%q: got %q, %v; want %q", input, got, err, want)
+		}
+	}
+}
+
+func TestBackupPickerTypedPath(t *testing.T) {
+	dir := backupTestStores(t)
+	t.Chdir(dir)
+	s := backupTestSession(t, "live", "p", exportID, "typed path")
+	if err := backupWrite([]*session{s}, "backup", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	backupTestStores(t)
+	keys := make(chan []byte, 1)
+	keys <- []byte("missing\r\x15backup\r")
+	close(keys)
+	var out bytes.Buffer
+	terminal := &tty{out: bufio.NewWriter(&out), keys: keys, wake: make(chan struct{})}
+	if msg := terminal.restoreBackupDialog(nil); !strings.HasPrefix(msg, "Restored 1") {
+		t.Fatalf("%s; last screen: %q", msg, out.String()[max(0, out.Len()-1800):])
 	}
 }
 
@@ -492,18 +695,18 @@ func TestBackupTrustedSymlinkRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(output, "backup.zip")
-	if err := backupWrite(pool, file, false); err != nil {
+	if err := backupWrite(pool, file, false, nil); err != nil {
 		t.Fatal("backup through linked output parent:", err)
 	}
-	if err := backupWrite(pool, filepath.Join(realConfig, "alias.zip"), false); err == nil {
+	if err := backupWrite(pool, filepath.Join(realConfig, "alias.zip"), false, nil); err == nil {
 		t.Fatal("physical output alias into config accepted")
 	}
 	inside := filepath.Join(parts(realConfig, "p", exportID)[1], "inside.zip")
 	backupTestWrite(t, inside, backupTestRead(t, file))
-	if _, err := backupRestore(inside, func([]line) string { t.Fatal("unsafe restore prompted"); return "overwrite" }); err == nil || !strings.Contains(err.Error(), "inside a restore destination") {
+	if _, err := backupRestore(inside, func([]line) string { t.Fatal("unsafe restore prompted"); return "overwrite" }, nil); err == nil || !strings.Contains(err.Error(), "inside a restore destination") {
 		t.Fatal("physical ZIP alias inside restore destination accepted:", err)
 	}
-	_, stage, err := backupStage(file)
+	_, stage, err := backupStage(file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +725,7 @@ func TestBackupTrustedSymlinkRoots(t *testing.T) {
 	if err := os.RemoveAll(pinned); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := backupRestore(file, func([]line) string { return "cancel" })
+	msg, err := backupRestore(file, func([]line) string { return "cancel" }, nil)
 	if err != nil || !strings.Contains(msg, "Restored 1") || backupTestRead(t, s.path) != "raw" {
 		t.Fatal("restore through linked roots:", msg, err)
 	}
@@ -539,12 +742,12 @@ func TestBackupRestoreTracksTrashChanges(t *testing.T) {
 				list = []*session{deleted, live}
 			}
 			file := filepath.Join(dir, "backup.zip")
-			if err := backupWrite(list, file, false); err != nil {
+			if err := backupWrite(list, file, false, nil); err != nil {
 				t.Fatal(err)
 			}
 			backupTestStores(t)
 			original := backupTestSession(t, "live", "p", exportID, "original")
-			msg, err := backupRestore(file, func([]line) string { return "overwrite" })
+			msg, err := backupRestore(file, func([]line) string { return "overwrite" }, nil)
 			if err != nil || !strings.Contains(msg, "Restored 1 session; skipped 1") {
 				t.Fatal(msg, err)
 			}
@@ -563,12 +766,12 @@ func TestBackupSharedTrashProtection(t *testing.T) {
 	dir := backupTestStores(t)
 	s := backupTestSession(t, "live", "p", exportID, "incoming")
 	file := filepath.Join(dir, "backup.zip")
-	if err := backupWrite([]*session{s}, file, false); err != nil {
+	if err := backupWrite([]*session{s}, file, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	backupTestWrite(t, s.path, "original")
 	backupTestWrite(t, parts(trash, "other", exportID)[0], "older recovery")
-	msg, err := backupRestore(file, func([]line) string { t.Fatal("shared trash collision prompted"); return "overwrite" })
+	msg, err := backupRestore(file, func([]line) string { t.Fatal("shared trash collision prompted"); return "overwrite" }, nil)
 	if err != nil || !strings.Contains(msg, "skipped 1") || backupTestRead(t, s.path) != "original" {
 		t.Fatal(msg, err)
 	}
@@ -583,7 +786,7 @@ func TestBackupDuplicateAppearsDuringReview(t *testing.T) {
 	idB := "11111111-4af1-44da-a134-90f6fafa5d25"
 	b := backupTestSession(t, "live", "b", idB, "b incoming")
 	file := filepath.Join(dir, "backup.zip")
-	if err := backupWrite([]*session{a, b}, file, false); err != nil {
+	if err := backupWrite([]*session{a, b}, file, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	backupTestStores(t)
@@ -591,7 +794,7 @@ func TestBackupDuplicateAppearsDuringReview(t *testing.T) {
 	msg, err := backupRestore(file, func([]line) string {
 		backupTestWrite(t, parts(config, "other", exportID)[0], "concurrent session")
 		return "overwrite"
-	})
+	}, nil)
 	if err != nil || !strings.Contains(msg, "skipped 1") || backupTestRead(t, parts(config, "other", exportID)[0]) != "concurrent session" {
 		t.Fatal(msg, err)
 	}
@@ -621,7 +824,7 @@ func TestBackupCaseAliases(t *testing.T) {
 	if backupTestRead(t, filepath.Join(base, "Output.txt")) != "first" {
 		t.Skip("filesystem is case insensitive")
 	}
-	if err := backupWrite([]*session{s}, filepath.Join(dir, "backup.zip"), false); err == nil || !strings.Contains(err.Error(), "case-colliding") {
+	if err := backupWrite([]*session{s}, filepath.Join(dir, "backup.zip"), false, nil); err == nil || !strings.Contains(err.Error(), "case-colliding") {
 		t.Fatal("source data silently omitted", err)
 	}
 }
@@ -688,7 +891,7 @@ func TestBackupRequiredTranscript(t *testing.T) {
 	if err := os.Mkdir(s.path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := backupWrite([]*session{s}, filepath.Join(dir, "backup.zip"), false); err == nil {
+	if err := backupWrite([]*session{s}, filepath.Join(dir, "backup.zip"), false, nil); err == nil {
 		t.Fatal("directory accepted as a transcript")
 	}
 }
