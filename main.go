@@ -1184,11 +1184,22 @@ func pin(s *session) (string, bool) {
 	return "Pinned \"" + name(s) + "\".", true
 }
 
+func cleanupDays() int {
+	var st struct {
+		Days float64 `json:"cleanupPeriodDays"`
+	}
+	b, _ := os.ReadFile(filepath.Join(config, "settings.json"))
+	if json.Unmarshal(b, &st) != nil || st.Days < 1 {
+		return 30
+	}
+	return int(st.Days)
+}
+
 func unpin(s *session) string {
 	for _, p := range parts(pinned, folder(s), s.id) {
 		os.RemoveAll(p)
 	}
-	if root(s) == config && s.mod.Before(time.Now().AddDate(0, 0, -30)) {
+	if root(s) == config && s.mod.Before(time.Now().AddDate(0, 0, -cleanupDays())) {
 		renew(s, files(s))
 	}
 	s.pinned = false

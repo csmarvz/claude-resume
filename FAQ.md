@@ -12,11 +12,11 @@ Only when you ask it to. Listing, searching, previewing and resuming only read t
 
 ## Why do old sessions disappear?
 
-Claude Code deletes them. Its cleanup removes sessions whose transcript hasn't changed for 30 days, and `file-history` and `session-env` entries that are as old. The `cleanupPeriodDays` setting in `~/.claude/settings.json` changes the number of days. claude-resume doesn't delete anything on its own, apart from the trash described below.
+Claude Code deletes them. Its cleanup removes sessions whose transcript hasn't changed for 30 days, and `file-history` and `session-env` entries that are as old. The `cleanupPeriodDays` setting in the `settings.json` of the Claude Code config folder (`~/.claude`, or `CLAUDE_CONFIG_DIR`) changes the number of days. claude-resume doesn't delete anything on its own, apart from the trash described below.
 
 ## How does archiving keep a session?
 
-`/archive` moves the session's files out of Claude Code's folder into `~/.claude-resume/archive`, keeping the same layout. Claude Code's cleanup only looks in its own folders, so it never sees an archived session. Restoring moves the files back and sets their date to today, so the 30 days start again; without that, Claude Code would delete an old session again the next time its cleanup runs.
+`/archive` moves the session's files out of Claude Code's folder into `~/.claude-resume/archive`, keeping the same layout. Claude Code's cleanup only looks in its own folders, so it never sees an archived session. Restoring moves the files back and sets their date to today, so the cleanup period starts again; without that, Claude Code would delete an old session again the next time its cleanup runs.
 
 ## How does pinning protect a session?
 
@@ -33,7 +33,7 @@ Every time claude-resume runs, it checks each pinned session:
 
 Between the cleanup and your next run of claude-resume, a deleted pinned session is missing from Claude Code's own `/resume`; it comes back on the next run. If Claude Code rewrote the transcript and then deleted it before claude-resume ran again, the restored transcript is the version from before the rewrite.
 
-Hard links only work within one disk, which `~/.claude-resume` and the Claude Code config folder already have to share. Unpinning removes the links in `~/.claude-resume/pinned`. If the session was last used more than 30 days ago, it is dated today, so that Claude Code's next cleanup doesn't delete it. Archiving or deleting a pinned session unpins it.
+Hard links only work within one disk, which `~/.claude-resume` and the Claude Code config folder already have to share. Unpinning removes the links in `~/.claude-resume/pinned`. If the session was last used longer ago than the cleanup period, it is dated today, so that Claude Code's next cleanup doesn't delete it. claude-resume reads the period from `cleanupPeriodDays` in the `settings.json` of the Claude Code config folder, and uses 30 days when it isn't set or isn't a positive number. Archiving or deleting a pinned session unpins it.
 
 ## What happens when I delete a session?
 

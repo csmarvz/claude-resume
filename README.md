@@ -91,11 +91,11 @@ On Linux and macOS, detected running sessions produce a best-effort live-copy wa
 
 ## Pinning sessions
 
-`/pin` (CTRL-T) keeps a session at the top of the list, marked with ★ and shown in bold, and protects it from Claude Code's cleanup while it stays in the session list. If Claude Code deletes a pinned session anyway, because claude-resume didn't run for 30 days, claude-resume puts it back the next time it runs. The [FAQ](FAQ.md#how-does-pinning-protect-a-session) explains how. `/unpin` makes it an ordinary session again; a session last used more than 30 days ago is dated today, so Claude Code doesn't delete it at its next cleanup.
+`/pin` (CTRL-T) keeps a session at the top of the list, marked with ★ and shown in bold, and protects it from Claude Code's cleanup while it stays in the session list. If Claude Code deletes a pinned session anyway, because claude-resume didn't run during Claude Code's cleanup period, claude-resume puts it back the next time it runs. The [FAQ](FAQ.md#how-does-pinning-protect-a-session) explains how. `/unpin` makes it an ordinary session again; a session last used longer ago than the cleanup period is dated today, so Claude Code doesn't delete it at its next cleanup.
 
 ## Archiving sessions
 
-`/archive` moves a session's files into `~/.claude-resume/archive`, outside Claude Code's folder. The session leaves the list, and Claude Code's cleanup can't reach it, so it never expires. `/list-archives` shows the archived sessions: ENTER restores one and resumes it, `/restore` only restores it. A restored session gets today's date, so Claude Code's 30 days start again from the restore. Sessions that are open in a running Claude Code process are refused.
+`/archive` moves a session's files into `~/.claude-resume/archive`, outside Claude Code's folder. The session leaves the list, and Claude Code's cleanup can't reach it, so it never expires. `/list-archives` shows the archived sessions: ENTER restores one and resumes it, `/restore` only restores it. A restored session gets today's date, so Claude Code's cleanup period starts again from the restore. Sessions that are open in a running Claude Code process are refused.
 
 The archive and the trash are shared by every Claude Code config: a session restored while `CLAUDE_CONFIG_DIR` points elsewhere goes into that config. Archiving and deleting move files, so `~/.claude-resume` has to be on the same disk as the config folder.
 

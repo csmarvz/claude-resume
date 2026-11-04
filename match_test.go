@@ -373,3 +373,25 @@ func TestPaneSize(t *testing.T) {
 		}
 	}
 }
+
+func TestUnpinCleanupDays(t *testing.T) {
+	oldConfig, oldPinned := config, pinned
+	t.Cleanup(func() { config, pinned = oldConfig, oldPinned })
+	config, pinned = t.TempDir(), t.TempDir()
+	id := "02c5f13e-4af1-44da-a134-90f6fafa5d25"
+	p := parts(config, "p", id)[0]
+	for _, tc := range []struct {
+		settings string
+		renewed  bool
+	}{{"", false}, {`{"cleanupPeriodDays": 0}`, false}, {`{"cleanupPeriodDays": "7"}`, false}, {`{"cleanupPeriodDays": 7}`, true}, {`{"cleanupPeriodDays": 7.0}`, true}} {
+		os.WriteFile(filepath.Join(config, "settings.json"), []byte(tc.settings), 0o600)
+		os.MkdirAll(filepath.Dir(p), 0o700)
+		os.WriteFile(p, []byte("one\n"), 0o600)
+		old := time.Now().AddDate(0, 0, -10)
+		os.Chtimes(p, old, old)
+		unpin(&session{path: p, id: id, mod: old})
+		if st, _ := os.Stat(p); (time.Since(st.ModTime()) < time.Minute) != tc.renewed {
+			t.Errorf("settings %q: renewed = %v", tc.settings, !tc.renewed)
+		}
+	}
+}
