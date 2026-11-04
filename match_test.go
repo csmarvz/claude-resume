@@ -243,7 +243,7 @@ func TestColumns(t *testing.T) {
 	choose := func(input string) string {
 		keys := make(chan []byte, 1)
 		out := &exportConfirmOutput{keys: keys, input: input}
-		return (&tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}).columns(list, false)
+		return (&tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}).columns(list)
 	}
 	if msg := choose("\x1b[B \x1b[B\x1b[B\x1b[B \x1b[B x\x1b"); msg != "" || !reflect.DeepEqual(columns, oldColumns) {
 		t.Fatalf("ESC changed columns: %q %v", msg, columns)
@@ -346,10 +346,30 @@ func TestCtrlN(t *testing.T) {
 		keys := make(chan []byte, 1)
 		return (&tty{out: bufio.NewWriter(&exportConfirmOutput{keys: keys, input: input}), keys: keys, wake: make(chan struct{})}).run(v)
 	}
-	if k, i := press(&view{keys: map[string]bool{"ctrl-n": true}, hide: true}, "\x0e\x1b"); k != "ctrl-n" || i != -1 {
+	if k, i := press(&view{keys: map[string]bool{"ctrl-n": true}}, "\x0e\x1b"); k != "ctrl-n" || i != -1 {
 		t.Fatalf("empty list: %q %d", k, i)
 	}
-	if k, _ := press(&view{items: []string{"a", "b"}, hide: true}, "\x0e\x1b"); k != "esc" {
+	if k, _ := press(&view{items: []string{"a", "b"}}, "\x0e\x1b"); k != "esc" {
 		t.Fatalf("view without CTRL-N returned %q", k)
+	}
+}
+
+func TestPaneSize(t *testing.T) {
+	oldSettings, oldSize := settings, paneSize
+	t.Cleanup(func() { settings, paneSize = oldSettings, oldSize })
+	settings, paneSize = filepath.Join(t.TempDir(), "settings.json"), "half"
+	items := []string{"item0", "item1", "item2"}
+	for _, want := range []struct{ size, item1, body string }{{"full", "", "body"}, {"hidden", "item1", ""}, {"half", "item1", "body"}} {
+		keys := make(chan []byte, 1)
+		out := &exportConfirmOutput{keys: keys, input: "\x00\x1b"}
+		v := &view{items: items, preview: func(int) []line { return []line{{"", "body"}} }}
+		(&tty{out: bufio.NewWriter(out), keys: keys, wake: make(chan struct{})}).run(v)
+		paneSize = ""
+		loadSettings()
+		screen := out.String()
+		screen = screen[strings.LastIndex(screen, "\x1b[?25l"):]
+		if paneSize != want.size || strings.Contains(screen, "item1") != (want.item1 != "") || strings.Contains(screen, "body") != (want.body != "") {
+			t.Fatalf("size %q, want %+v, screen %q", paneSize, want, screen)
+		}
 	}
 }
