@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- CTRL-SPACE switches the preview between half height, full height and hidden, and the choice is saved in `~/.claude-resume/settings.json` (#29). At full height, the list shows only the selected session.
+
 ### Changed
 
 - `/restore-backup` completes paths as you type or when you press Tab. It lists folders before ZIPs, selects the newest ZIP by default, and previews sessions by date, title or ID, and category. Picker backup and restore commands show progress (#40).

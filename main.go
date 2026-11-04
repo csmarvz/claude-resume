@@ -52,6 +52,7 @@ var (
 	columns    = []string{"pin", "date", "title", "folder", "id"}
 	allColumns = []string{"pin", "date", "title", "folder", "size", "tokens", "id"}
 	layout     = allColumns
+	paneSize   = "half"
 
 	customMark     = []byte(`"type":"custom-title"`)
 	aiMark         = []byte(`"type":"ai-title"`)
@@ -514,14 +515,21 @@ func loadSettings() {
 	var st struct {
 		Columns *[]string `json:"columns"`
 		Order   []string  `json:"order"`
+		Preview string    `json:"preview"`
 	}
-	if b, err := os.ReadFile(settings); err == nil && json.Unmarshal(b, &st) == nil && st.Columns != nil {
+	if b, err := os.ReadFile(settings); err != nil || json.Unmarshal(b, &st) != nil {
+		return
+	}
+	if st.Columns != nil {
 		columns, layout = known(*st.Columns), known(st.Order)
+	}
+	if slices.Contains([]string{"half", "full", "hidden"}, st.Preview) {
+		paneSize = st.Preview
 	}
 }
 
 func saveSettings() error {
-	b, _ := json.MarshalIndent(map[string][]string{"columns": append([]string{}, columns...), "order": layout}, "", "  ")
+	b, _ := json.MarshalIndent(map[string]any{"columns": append([]string{}, columns...), "order": layout, "preview": paneSize}, "", "  ")
 	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 		return err
 	}

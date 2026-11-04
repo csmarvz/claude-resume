@@ -174,13 +174,13 @@ type view struct {
 	fixed    bool
 	warn     string
 
-	query     []rune
-	cur       int
-	sel, top  int
-	dim, hide bool
-	pscroll   int
-	shown     []int
-	pos       [][]int
+	query    []rune
+	cur      int
+	sel, top int
+	dim      bool
+	pscroll  int
+	shown    []int
+	pos      [][]int
 }
 
 func (v *view) filter() {
@@ -259,7 +259,8 @@ func (t *tty) run(v *view) (string, int) {
 		case "shift-down":
 			v.pscroll++
 		case "ctrl-space":
-			v.hide = !v.hide
+			paneSize = map[string]string{"half": "full", "full": "hidden", "hidden": "half"}[paneSize]
+			saveSettings()
 		case "left":
 			v.cur, v.dim = max(0, v.cur-1), false
 		case "right":
@@ -378,7 +379,11 @@ func (t *tty) draw(v *view) {
 	}
 
 	ph := 0
-	if v.preview != nil && !v.hide && h >= 10 {
+	switch {
+	case v.preview == nil || paneSize == "hidden" || h < 10:
+	case paneSize == "full":
+		ph = h - len(rows) - 2
+	default:
 		ph = h * 60 / 100
 	}
 	area := max(1, h-len(rows)-ph-1)
@@ -543,7 +548,7 @@ var shortcuts = [][2]string{
 	{"CTRL-D", "delete the session"},
 	{"CTRL-A", "show the sessions of one folder"},
 	{"CTRL-N", "start a new Claude Code session"},
-	{"CTRL-SPACE", "show or hide the preview"},
+	{"CTRL-SPACE", "switch the preview between half height, full height and hidden"},
 	{"SHIFT-↑↓", "scroll the preview"},
 	{"CTRL-U CTRL-W", "delete the search before the cursor, or the word before it"},
 	{"ESC", "go back, or quit"},
@@ -637,7 +642,8 @@ func pick(all []*session) {
 		return func(q string, lines []line) bool {
 			saved := *v
 			defer func() { *v = saved }()
-			v.preview, v.foot, v.warn, v.dim, v.hide, v.pscroll = func(int) []line { return lines }, q, warn, true, false, 0
+			v.preview, v.foot, v.warn, v.dim, v.pscroll = func(int) []line { return lines }, q, warn, true, 0
+			showPane()
 			redraw := true
 			for {
 				if redraw || t.resized() {
@@ -779,7 +785,8 @@ func pick(all []*session) {
 			execClaude()
 		case "help":
 			saved, text := *v, help(mode)
-			v.preview, v.foot, v.dim, v.hide, v.pscroll = func(int) []line { return text }, "↑↓ PGUP PGDN scroll · any other key goes back", true, false, 0
+			v.preview, v.foot, v.dim, v.pscroll = func(int) []line { return text }, "↑↓ PGUP PGDN scroll · any other key goes back", true, 0
+			showPane()
 		scroll:
 			for redraw := true; ; {
 				if redraw || t.resized() {
@@ -807,7 +814,7 @@ func pick(all []*session) {
 		case "ctrl-a":
 			choose = true
 		case "columns":
-			msg = t.columns(shown, v.hide)
+			msg = t.columns(shown)
 		case "enter":
 			if mode != "" {
 				var ok bool
@@ -848,7 +855,7 @@ func pick(all []*session) {
 			}
 		case "ctrl-r":
 			s := shown[i]
-			e := &view{items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(s.title),
+			e := &view{items: v.items[i : i+1], edit: true, query: []rune(s.title),
 				preview: func(int) []line { return v.preview(i) }, foot: "Type the new title · ENTER save · ESC cancel"}
 			e.cur = len(e.query)
 			msg = ""
@@ -859,10 +866,9 @@ func pick(all []*session) {
 				delete(loading, s.path)
 				mu.Unlock()
 			}
-			v.hide = e.hide
 		case "export":
 			s := shown[i]
-			e := &view{items: v.items[i : i+1], edit: true, hide: v.hide, query: []rune(exportName(s)),
+			e := &view{items: v.items[i : i+1], edit: true, query: []rune(exportName(s)),
 				preview: func(int) []line { return v.preview(i) }, foot: "Type the path · ENTER save · ESC cancel"}
 			e.cur = len(e.query)
 			msg = ""
@@ -890,7 +896,6 @@ func pick(all []*session) {
 				exported = printable(path)
 				break
 			}
-			v.hide = e.hide
 		case "ctrl-d":
 			t.drain()
 			s, to, color, ok := shown[i], trash, orange, false
@@ -927,7 +932,13 @@ func pick(all []*session) {
 	}
 }
 
-func (t *tty) columns(shown []*session, hide bool) string {
+func showPane() {
+	if paneSize == "hidden" {
+		paneSize = "half"
+	}
+}
+
+func (t *tty) columns(shown []*session) string {
 	list, sample := slices.Clone(columns), shown[:min(8, len(shown))]
 	on, ref := slices.Clone(columns), known(append(slices.Clone(layout), allColumns...))
 	for k, c := range ref {
@@ -942,7 +953,7 @@ func (t *tty) columns(shown []*session, hide bool) string {
 	chosen := func() []string {
 		return slices.DeleteFunc(slices.Clone(list), func(c string) bool { return !slices.Contains(on, c) })
 	}
-	c := &view{fixed: true, hide: hide, keys: map[string]bool{" ": true, "shift-up": true, "shift-down": true},
+	c := &view{fixed: true, keys: map[string]bool{" ": true, "shift-up": true, "shift-down": true},
 		foot: "↑↓ select · SPACE show or hide · SHIFT-↑↓ move · ENTER save · ESC cancel"}
 	c.preview = func(int) []line {
 		if stats(on) {
@@ -1020,7 +1031,8 @@ func (t *tty) command(v *view, cmds []command) string {
 				}
 				lines = append(lines, l)
 			}
-			v.query, v.cur, v.dim, v.hide, v.pscroll = []rune(q), len(q), false, false, 0
+			v.query, v.cur, v.dim, v.pscroll = []rune(q), len(q), false, 0
+			showPane()
 			v.preview, v.foot = func(int) []line { return lines }, "Type a command · ↑↓ select · ENTER run · ESC back"
 			t.draw(v)
 		}
